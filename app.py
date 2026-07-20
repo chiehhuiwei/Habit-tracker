@@ -468,21 +468,26 @@ def pause_resume_timer():
 def check_timer_settle_fields():
     global timer_state
     if not timer_state["is_active"]:
-        return gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)
+        return gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)
         
     inv = next((i for i in service.investments if i["id"] == timer_state["inv_id"]), None)
     if inv and timer_state["item_id"]:
         status_update = gr.update(visible=True, value="inProgress")
         if inv["progress_type"] == "pages":
-            return gr.update(visible=True, value=""), gr.update(visible=True, value="300"), status_update
+            # Look up current item progress to pre-fill start_pages
+            item = next((it for it in service.items if it["id"] == timer_state["item_id"]), None)
+            cur_page = ""
+            if item and item.get("total") and item.get("progress") is not None:
+                cur_page = str(int(round(item["progress"] * item["total"])))
+            return gr.update(visible=True, value=cur_page), gr.update(visible=True, value=cur_page), gr.update(visible=True, value="300"), status_update
         elif inv["progress_type"] == "percentage":
-            return gr.update(visible=True, value="0"), gr.update(visible=False), status_update
+            return gr.update(visible=True, value="0"), gr.update(visible=False), gr.update(visible=False), status_update
         else:
-            return gr.update(visible=False), gr.update(visible=False), status_update
+            return gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), status_update
             
-    return gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)
+    return gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)
 
-def settle_timer(progress_val, total_val, remarks, settle_status="inProgress"):
+def settle_timer(start_pages_val, progress_val, total_val, remarks, settle_status="inProgress"):
     global timer_state
     if not timer_state["is_active"]:
         return "無進行中的計時會話"
@@ -499,6 +504,7 @@ def settle_timer(progress_val, total_val, remarks, settle_status="inProgress"):
     inv = next((i for i in service.investments if i["id"] == timer_state["inv_id"]), None)
     
     progress_snapshot = None
+    pages_read_detail = ""
     if inv and inv["progress_type"] != "none" and timer_state["item_id"]:
         try:
             if inv["progress_type"] == "pages":
@@ -506,10 +512,25 @@ def settle_timer(progress_val, total_val, remarks, settle_status="inProgress"):
                 tot = float(total_val)
                 if tot > 0:
                     progress_snapshot = min(cur / tot, 1.0)
-                    # update item total pages limit
+                    # update item total pages and progress
                     for it in service.items:
                         if it["id"] == timer_state["item_id"]:
                             it["total"] = tot
+                            it["progress"] = progress_snapshot
+                    from timevest_service import save_json, ITEMS_FILE
+                    save_json(ITEMS_FILE, service.items)
+                    # Note: set_item_status() below will also call save_json, but we save here
+                    # to ensure total/progress are persisted even if status update is skipped.
+                    # Build a detail string showing the page range read
+                    try:
+                        start_p = float(start_pages_val) if start_pages_val and str(start_pages_val).strip() else None
+                        if start_p is not None:
+                            pages_read = int(cur - start_p)
+                            pages_read_detail = f"讀至第 {int(cur)} 頁（本次讀了 {pages_read} 頁，第 {int(start_p)}–{int(cur)} 頁）"
+                        else:
+                            pages_read_detail = f"讀至第 {int(cur)} 頁"
+                    except Exception:
+                        pages_read_detail = f"讀至第 {int(cur)} 頁"
             elif inv["progress_type"] == "percentage":
                 progress_snapshot = min(float(progress_val) / 100.0, 1.0)
         except Exception:
@@ -523,11 +544,22 @@ def settle_timer(progress_val, total_val, remarks, settle_status="inProgress"):
     start_t = datetime.now(ZoneInfo("Asia/Taipei")) - timedelta(seconds=duration)
     end_t = datetime.now(ZoneInfo("Asia/Taipei"))
     
+    # Combine pages detail with remarks
+    final_detail = ""
+    if pages_read_detail and remarks:
+        final_detail = f"{pages_read_detail}｜{remarks}"
+    elif pages_read_detail:
+        final_detail = pages_read_detail
+    elif remarks:
+        final_detail = remarks
+    else:
+        final_detail = "專注投入"
+    
     success, ms_list = service.log_activity(
         inv_id=timer_state["inv_id"],
         item_id=timer_state["item_id"],
         duration_seconds=duration,
-        detail=remarks if remarks else "專注投入",
+        detail=final_detail,
         start_time=start_t,
         end_time=end_t,
         progress_snapshot=progress_snapshot
@@ -537,8 +569,10 @@ def settle_timer(progress_val, total_val, remarks, settle_status="inProgress"):
     timer_state["is_paused"] = False
     
     msg = f"成功結算投入 {duration // 60} 分鐘！"
+    if pages_read_detail:
+        msg += f"\n📖 {pages_read_detail}"
     if ms_list:
-        msg += "\n解鎖里程碑！" + "\n".join([item["title"] for item in ms_list])
+        msg += "\n🏆 解鎖里程碑！" + "\n".join([item["title"] for item in ms_list])
     return msg
 
 def discard_timer():
@@ -579,16 +613,23 @@ def add_new_item_option(inv_name, name, total_val):
     inv = next((i for i in service.investments if i["name"] == inv_name), None)
     if not inv:
         return "請先選擇投資帳戶"
-    if not name.strip():
+    clean_name = name.strip()
+    if not clean_name:
         return "請輸入項目名稱"
+    
+    # Check duplicate
+    existing = next((it for it in service.items if it["investment_id"] == inv["id"] and it["name"].strip().lower() == clean_name.lower()), None)
+    if existing:
+        return f"⚠️ 項目「{clean_name}」已存在於該帳戶中，請勿重複新增！"
+
     tot = None
     if inv["progress_type"] == "pages" and total_val:
         try:
             tot = float(total_val)
         except:
             pass
-    service.add_item(inv["id"], name.strip(), tot)
-    return f"已新增項目：{name}"
+    service.add_item(inv["id"], clean_name, tot)
+    return f"已新增項目：{clean_name}"
 
 def update_item_status_option(item_name, status):
     item = next((i for i in service.items if i["name"] == item_name), None)
@@ -601,11 +642,11 @@ def dynamic_update_items_dropdown(inv_name):
     inv = next((i for i in service.investments if i["name"] == inv_name), None)
     if not inv or not inv["item_label"]:
         return gr.update(choices=[], visible=False, label="項目")
-    items = service.get_items(inv_id=inv["id"], status="inProgress")
+    items = service.get_items(inv_id=inv["id"])  # show all items regardless of status
     return gr.update(choices=[it["name"] for it in items], visible=True, label=inv["item_label"])
 
 def get_timer_item_panel_state(inv_name):
-    """Returns (item_dropdown update, warning_html update, quick_add_group update, quick_add_label, settle_status update) """
+    """Returns (item_dropdown update, warning_html update, quick_add_group update, quick_add_label, settle_status update, delete_btn update) """
     inv = next((i for i in service.investments if i["name"] == inv_name), None)
     if not inv or not inv["item_label"]:
         return (
@@ -613,26 +654,29 @@ def get_timer_item_panel_state(inv_name):
             gr.update(visible=False),
             gr.update(visible=False),
             inv["item_label"] if inv and inv["item_label"] else "項目",
+            gr.update(visible=False),
             gr.update(visible=False)
         )
     label = inv["item_label"]
-    items = service.get_items(inv_id=inv["id"], status="inProgress")
+    items = service.get_items(inv_id=inv["id"])  # show all items regardless of status
     status_update = gr.update(visible=True, value="inProgress")
     if items:
         return (
-            gr.update(choices=[it["name"] for it in items], visible=True, label=f"選擇{label}"),
+            gr.update(choices=[it["name"] for it in items], visible=True, label=f"選擇{label}", value=items[0]["name"]),
             gr.update(visible=False),
             gr.update(visible=False),
             label,
-            status_update
+            status_update,
+            gr.update(visible=True)
         )
     else:
         return (
             gr.update(choices=[], visible=False, label=f"選擇{label}"),
-            gr.update(visible=True, value=f"<div style='display:flex;align-items:center;gap:8px;padding:10px 14px;background:#FFF7ED;border:1px solid #FDBA74;border-radius:10px;font-size:13px;color:#92400E;'>⚠️ 目前無進行中的{label}，請先新增。</div>"),
+            gr.update(visible=True, value=f"<div style='display:flex;align-items:center;gap:8px;padding:10px 14px;background:#FFF7ED;border:1px solid #FDBA74;border-radius:10px;font-size:13px;color:#92400E;'>⚠️ 目前無{label}，請先新增。</div>"),
             gr.update(visible=True),
             label,
-            status_update
+            status_update,
+            gr.update(visible=False)
         )
 
 def dynamic_update_all_items_dropdown():
@@ -642,7 +686,7 @@ def dynamic_update_all_items_dropdown():
 # Gradio Theme & Custom CSS
 # ----------------------
 custom_css = """
-:root, body, .gradio-container {
+:root, .dark, body, .gradio-container {
     background-color: #FFFFFF !important;
     color: #0F172A !important;
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Outfit", sans-serif !important;
@@ -651,6 +695,8 @@ custom_css = """
     --body-background-fill: #FFFFFF !important;
     --background-fill-primary: #FFFFFF !important;
     --background-fill-secondary: #F8FAFC !important;
+    --body-text-color: #0F172A !important;
+    --body-text-color-subdued: #475569 !important;
     --border-color-accent: #C89D45 !important;
     --border-color-primary: rgba(200, 157, 69, 0.2) !important;
     --block-background-fill: #F8FAFC !important;
@@ -744,8 +790,19 @@ theme = gr.themes.Soft(
 )
 
 with gr.Blocks(theme=theme, css=custom_css, title="時光投資簿 timeVest") as app:
-    # Force light theme class
-    gr.HTML("<script>document.querySelector('body').classList.remove('dark');</script>")
+    # Force light theme class and handle system dark mode changes dynamically
+    gr.HTML("""
+        <script>
+            function enforceLightMode() {
+                document.documentElement.classList.remove('dark');
+                document.body.classList.remove('dark');
+            }
+            enforceLightMode();
+            const observer = new MutationObserver(enforceLightMode);
+            observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+            observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+        </script>
+    """)
     
     gr.HTML(
         """
@@ -793,18 +850,26 @@ with gr.Blocks(theme=theme, css=custom_css, title="時光投資簿 timeVest") as
                 )
 
                 # --- Item selector (shown only when account has item_label) ---
-                # Compute initial state
+                # Compute initial state (show all items, not just inProgress)
                 _init_inv = service.investments[0] if service.investments else None
-                _init_items = service.get_items(inv_id=_init_inv["id"], status="inProgress") if (_init_inv and _init_inv["item_label"]) else []
+                _init_items = service.get_items(inv_id=_init_inv["id"]) if (_init_inv and _init_inv["item_label"]) else []
                 _init_has_label = bool(_init_inv and _init_inv["item_label"])
                 _init_label = _init_inv["item_label"] if _init_has_label else "項目"
 
-                item_dropdown = gr.Dropdown(
-                    choices=[it["name"] for it in _init_items] if _init_items else [],
-                    label=f"選擇{_init_label}" if _init_has_label else "項目",
-                    visible=_init_has_label and bool(_init_items),
-                    interactive=True
-                )
+                with gr.Row():
+                    item_dropdown = gr.Dropdown(
+                        choices=[it["name"] for it in _init_items] if _init_items else [],
+                        label=f"選擇{_init_label}" if _init_has_label else "項目",
+                        visible=_init_has_label and bool(_init_items),
+                        interactive=True,
+                        scale=4
+                    )
+                    delete_item_quick_btn = gr.Button(
+                        "🗑️ 刪除項目",
+                        variant="stop",
+                        visible=_init_has_label and bool(_init_items),
+                        scale=1
+                    )
 
                 # Warning: account has item_label but no in-progress items
                 timer_item_warning = gr.HTML(
@@ -825,7 +890,8 @@ with gr.Blocks(theme=theme, css=custom_css, title="時光投資簿 timeVest") as
                 # Dynamic inputs during timer or settlement
                 with gr.Group(visible=True) as settle_panel:
                     gr.Markdown("#### 結算投入進度")
-                    settle_progress = gr.Textbox(label="當前進度 (頁數 / 百分比)", visible=False, placeholder="ignore")
+                    settle_start_pages = gr.Textbox(label="起始頁數 (本次開始讀的頁數)", visible=False, placeholder="例如：150")
+                    settle_progress = gr.Textbox(label="讀到第幾頁 (結束時的頁數)", visible=False, placeholder="例如：200")
                     settle_total = gr.Textbox(label="總頁數", visible=False, placeholder="ignore")
                     remarks = gr.Textbox(label="備忘備註", placeholder="寫下本次投入的重點...")
                     settle_status = gr.Radio(
@@ -854,14 +920,14 @@ with gr.Blocks(theme=theme, css=custom_css, title="時光投資簿 timeVest") as
                     value=service.investments[0]["name"] if service.investments else None
                 )
                 
-                # Check initial items for default selection
+                # Check initial items for default selection (show all items)
                 init_choices = []
                 init_visible = False
                 init_label = "項目"
                 if service.investments:
                     default_inv = service.investments[0]
                     if default_inv["item_label"]:
-                        init_choices = [it["name"] for it in service.get_items(inv_id=default_inv["id"], status="inProgress")]
+                        init_choices = [it["name"] for it in service.get_items(inv_id=default_inv["id"])]
                         init_visible = True
                         init_label = default_inv["item_label"]
                         
@@ -1061,29 +1127,65 @@ with gr.Blocks(theme=theme, css=custom_css, title="時光投資簿 timeVest") as
     invest_dropdown.change(
         fn=get_timer_item_panel_state,
         inputs=[invest_dropdown],
-        outputs=[item_dropdown, timer_item_warning, timer_quick_add_group, timer_quick_item_name, settle_status]
+        outputs=[item_dropdown, timer_item_warning, timer_quick_add_group, timer_quick_item_name, settle_status, delete_item_quick_btn]
     )
 
     # Inline quick-add item from the Focus Timer tab
     def timer_quick_add_item(inv_name, item_name):
         inv = next((i for i in service.investments if i["name"] == inv_name), None)
         if not inv or not item_name.strip():
-            return gr.update(), gr.update(), gr.update(), "", gr.update()
-        service.add_item(inv["id"], item_name.strip(), None)
-        items = service.get_items(inv_id=inv["id"], status="inProgress")
+            return gr.update(), gr.update(), gr.update(), "", gr.update(), gr.update()
+        
+        clean_name = item_name.strip()
+        # Check duplicate — show all items regardless of status
+        existing = next((it for it in service.items if it["investment_id"] == inv["id"] and it["name"].strip().lower() == clean_name.lower()), None)
+        if existing:
+            items = service.get_items(inv_id=inv["id"])  # all items
+            label = inv["item_label"] or "項目"
+            return (
+                gr.update(choices=[it["name"] for it in items], visible=True, label=f"選擇{label}", value=existing["name"]),
+                gr.update(visible=False),
+                gr.update(visible=False),
+                "",
+                gr.update(visible=True, value="inProgress"),
+                gr.update(visible=True)
+            )
+            
+        service.add_item(inv["id"], clean_name, None)
+        items = service.get_items(inv_id=inv["id"])  # all items
         label = inv["item_label"] or "項目"
         return (
-            gr.update(choices=[it["name"] for it in items], visible=True, label=f"選擇{label}"),
+            gr.update(choices=[it["name"] for it in items], visible=True, label=f"選擇{label}", value=clean_name),
             gr.update(visible=False),
             gr.update(visible=False),
             "",
-            gr.update(visible=True, value="inProgress")
+            gr.update(visible=True, value="inProgress"),
+            gr.update(visible=True)
         )
 
     timer_quick_add_btn.click(
         fn=timer_quick_add_item,
         inputs=[invest_dropdown, timer_quick_item_name],
-        outputs=[item_dropdown, timer_item_warning, timer_quick_add_group, timer_quick_item_name, settle_status]
+        outputs=[item_dropdown, timer_item_warning, timer_quick_add_group, timer_quick_item_name, settle_status, delete_item_quick_btn]
+    )
+
+    def timer_quick_delete_item(inv_name, item_name):
+        inv = next((i for i in service.investments if i["name"] == inv_name), None)
+        if not inv or not item_name:
+            state = get_timer_item_panel_state(inv_name) if inv else (gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update())
+            return state + ("請選擇要刪除的項目",)
+            
+        item = next((it for it in service.items if it["investment_id"] == inv["id"] and it["name"] == item_name), None)
+        if item:
+            service.delete_item(item["id"])
+            
+        state = get_timer_item_panel_state(inv_name)
+        return state + (f"已成功刪除項目：{item_name}",)
+
+    delete_item_quick_btn.click(
+        fn=timer_quick_delete_item,
+        inputs=[invest_dropdown, item_dropdown],
+        outputs=[item_dropdown, timer_item_warning, timer_quick_add_group, timer_quick_item_name, settle_status, delete_item_quick_btn, timer_msg]
     )
 
     manual_invest_dropdown.change(
@@ -1112,30 +1214,28 @@ with gr.Blocks(theme=theme, css=custom_css, title="時光投資簿 timeVest") as
         outputs=[timer_msg, pause_btn]
     )
 
-    settle_btn.click(
-        fn=check_timer_settle_fields,
-        outputs=[settle_progress, settle_total, settle_status]
-    )
-
     # Confirm settle
-    def complete_settle_workflow(progress_val, total_val, remarks_val, settle_status_val, db_start_val, db_end_val):
-        msg = settle_timer(progress_val, total_val, remarks_val, settle_status_val)
+    def complete_settle_workflow(start_pages_val, progress_val, total_val, remarks_val, settle_status_val, db_start_val, db_end_val):
+        msg = settle_timer(start_pages_val, progress_val, total_val, remarks_val, settle_status_val)
         banner = get_banner_html(db_start_val.strip(), db_end_val.strip())
         alloc = get_allocation_html(db_start_val.strip(), db_end_val.strip())
-        return msg, banner, alloc, gr.update(active=False), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), get_stopwatch_html("00:00"), "準備投資"
+        return msg, banner, alloc, gr.update(active=False), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), get_stopwatch_html("00:00"), "準備投資"
 
     settle_btn.click(
+        fn=check_timer_settle_fields,
+        outputs=[settle_start_pages, settle_progress, settle_total, settle_status]
+    ).then(
         fn=complete_settle_workflow,
-        inputs=[settle_progress, settle_total, remarks, settle_status, dashboard_start_date, dashboard_end_date],
-        outputs=[timer_msg, banner_view, allocation_view, stopwatch_trigger, settle_progress, settle_total, settle_status, stopwatch_display, timer_msg]
+        inputs=[settle_start_pages, settle_progress, settle_total, remarks, settle_status, dashboard_start_date, dashboard_end_date],
+        outputs=[timer_msg, banner_view, allocation_view, stopwatch_trigger, settle_start_pages, settle_progress, settle_total, settle_status, stopwatch_display, timer_msg]
     )
 
     discard_btn.click(
         fn=discard_timer,
         outputs=[timer_msg]
     ).then(
-        fn=lambda: (gr.update(active=False), get_stopwatch_html("00:00"), "準備投資", gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)),
-        outputs=[stopwatch_trigger, stopwatch_display, timer_msg, settle_progress, settle_total, settle_status]
+        fn=lambda: (gr.update(active=False), get_stopwatch_html("00:00"), "準備投資", gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)),
+        outputs=[stopwatch_trigger, stopwatch_display, timer_msg, settle_start_pages, settle_progress, settle_total, settle_status]
     )
 
     # Refresh dashboard
@@ -1200,13 +1300,30 @@ with gr.Blocks(theme=theme, css=custom_css, title="時光投資簿 timeVest") as
         outputs=[items_display_html]
     )
 
+    def sync_item_dropdowns_after_add(inv_name):
+        """After adding a new item in the Project Management tab, refresh the Focus Timer
+        and Manual Entry dropdowns to include the newly added item."""
+        inv = next((i for i in service.investments if i["name"] == inv_name), None)
+        if not inv:
+            return gr.update(), gr.update()
+        items = service.get_items(inv_id=inv["id"])  # all items
+        all_item_names = [it["name"] for it in items]
+        if inv["item_label"]:
+            return (
+                gr.update(choices=all_item_names, visible=True, label=f"選擇{inv['item_label']}"),
+                gr.update(choices=all_item_names, visible=True, label=inv["item_label"])
+            )
+        else:
+            return gr.update(choices=all_item_names), gr.update(choices=all_item_names)
+
     new_item_btn.click(
         fn=add_new_item_option,
         inputs=[items_inv_dropdown, new_item_name, new_item_total],
         outputs=[new_item_status]
     ).then(
-        fn=dynamic_update_all_items_dropdown,
-        outputs=[item_dropdown]
+        fn=sync_item_dropdowns_after_add,
+        inputs=[items_inv_dropdown],
+        outputs=[item_dropdown, manual_item_dropdown]
     )
 
     # Tab 2 actions: Yields
@@ -1470,14 +1587,14 @@ with gr.Blocks(theme=theme, css=custom_css, title="時光投資簿 timeVest") as
         return msg
 
     def sync_dropdowns_after_update(inv_name):
+        """After updating an item's progress/status, refresh the Focus Timer and Manual Entry dropdowns."""
         inv = next((i for i in service.investments if i["name"] == inv_name), None)
         if not inv:
             return gr.update(choices=[], visible=False), gr.update(choices=[], visible=False)
-        items = service.get_items(inv_id=inv["id"])
-        prog_items = [it["name"] for it in items if it["status"] == "inProgress"]
+        items = service.get_items(inv_id=inv["id"])  # all items regardless of status
         all_item_names = [it["name"] for it in items]
         return (
-            gr.update(choices=prog_items, visible=bool(inv["item_label"] and prog_items)),
+            gr.update(choices=all_item_names, visible=bool(inv["item_label"] and all_item_names)),
             gr.update(choices=all_item_names, visible=bool(inv["item_label"]))
         )
 
@@ -1540,5 +1657,26 @@ def run_initial_sync():
         print(f"Garmin sync failed: {e}")
 
 threading.Thread(target=run_initial_sync, daemon=True).start()
+
+# Page load refresh: reload local JSON data and refresh all dropdowns
+def on_page_load():
+    """Re-read JSON files to restore in-memory state after server restarts."""
+    from timevest_service import load_json, INVESTMENTS_FILE, ITEMS_FILE, MILESTONES_FILE
+    service.investments = load_json(INVESTMENTS_FILE, [])
+    service.items = load_json(ITEMS_FILE, [])
+    service.milestones = load_json(MILESTONES_FILE, [])
+    choices = get_investment_choices()
+    return (
+        gr.update(choices=choices, value=service.investments[0]["name"] if service.investments else None),
+        gr.update(choices=choices, value=service.investments[0]["name"] if service.investments else None),
+        gr.update(choices=choices, value=service.investments[0]["name"] if service.investments else None),
+        gr.update(choices=choices, value=service.investments[0]["name"] if service.investments else None),
+        gr.update(choices=choices),
+    )
+
+app.load(
+    fn=on_page_load,
+    outputs=[invest_dropdown, manual_invest_dropdown, items_inv_dropdown, hist_inv_dropdown, delete_inv_dropdown]
+)
 
 app.launch(server_name="0.0.0.0")
