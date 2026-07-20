@@ -1665,6 +1665,7 @@ def on_page_load():
     service.investments = load_json(INVESTMENTS_FILE, [])
     service.items = load_json(ITEMS_FILE, [])
     service.milestones = load_json(MILESTONES_FILE, [])
+    service.deduplicate_items()
     choices = get_investment_choices()
     return (
         gr.update(choices=choices, value=service.investments[0]["name"] if service.investments else None),
