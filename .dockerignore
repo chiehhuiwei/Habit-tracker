@@ -1,0 +1,27 @@
+# Version control
+.git
+.gitignore
+
+# Python artefacts
+__pycache__
+*.py[cod]
+*.pyo
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# Virtual environments
+.venv
+venv
+env
+
+# Secrets — never bake into image
+.env
+gcp-key.json
+
+# Local dev / OS files
+.DS_Store
+*.log
+
+# Test files (not needed at runtime)
+test_*.py

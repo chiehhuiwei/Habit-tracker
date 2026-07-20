@@ -32,13 +32,14 @@ This file is the authoritative reference for any developer or AI agent working o
 |-------|-----------|---------|
 | UI Framework | [Gradio](https://gradio.app) | 5.49.1 |
 | Language | Python | 3.10 |
+| Package Manager | [uv](https://docs.astral.sh/uv/) | latest (replaces pip) |
 | Data Store (cloud) | Google BigQuery | `google-cloud-bigquery >= 3.0.0` |
 | Data Store (local) | JSON flat files (`investments.json`, `items.json`, `milestones.json`) | — |
 | Data Analysis | Pandas | >= 2.0.0 |
 | Charting | Matplotlib | >= 3.7.0 |
 | Activity Sync | Garmin Connect (`garminconnect`) | >= 0.3.1 |
 | Config | `python-dotenv` | >= 1.0.0 |
-| Containerisation | Docker | python:3.10 base image |
+| Containerisation | Docker | python:3.10-slim, multi-stage build |
 
 ---
 
@@ -53,9 +54,10 @@ Habit-tracker/
 ├── items.json              # Local persistent store: list of tracked items (books, courses, etc.)
 ├── habits.json             # Local persistent store: habit records (legacy)
 ├── milestones.json         # Local persistent store: milestones and monthly summaries
-├── requirements.txt        # Python dependencies
-├── Dockerfile              # Container build definition
-├── install.sh              # Server bootstrap script
+├── requirements.txt        # Python dependencies (used by uv for installs)
+├── Dockerfile              # Multi-stage container build (builder stage uses uv)
+├── .dockerignore           # Excludes .venv, .git, secrets from Docker build context
+├── install.sh              # Server bootstrap script (uses uv pip install)
 ├── .env                    # Secret environment variables (NOT committed)
 ├── .env.example            # Template for .env
 └── gcp-key.json            # GCP service account key (NOT committed; mount as secret)
@@ -199,9 +201,34 @@ Before opening a PR, confirm:
 
 ## 7. Deployment Reference
 
-### Docker (VM)
+### Package Manager: uv
+
+All Python dependencies are managed with **[uv](https://docs.astral.sh/uv/)** — a Rust-based package manager that is 10–100x faster than pip.
+
 ```bash
-# Build
+# One-time install (on a fresh VM or dev machine)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install project dependencies (replaces: pip install -r requirements.txt)
+uv pip install -r requirements.txt
+
+# Add a new package
+uv pip install <package> && uv pip freeze > requirements.txt
+```
+
+> **Do not** use bare `pip install` anywhere — always use `uv pip install` so the cache and venv remain consistent.
+
+### Docker (VM)
+
+The Dockerfile uses a **two-stage build** powered by uv:
+
+| Stage | Base Image | Purpose |
+|-------|-----------|--------|
+| `builder` | `python:3.10-slim` | Installs uv, creates `.venv`, resolves all dependencies |
+| runtime | `python:3.10-slim` | Copies `.venv` + app code only — no build tooling |
+
+```bash
+# Build (subsequent builds are fast — uv cache mount skips re-downloading packages)
 docker build -t habit-tracker .
 
 # Run (mount secrets externally)
