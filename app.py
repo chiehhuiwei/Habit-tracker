@@ -836,110 +836,111 @@ with gr.Blocks(theme=theme, css=custom_css, title="時光投資簿 timeVest") as
             dashboard_refresh_btn = gr.Button("更新儀表板", variant="secondary")
 
     with gr.Tabs():
-        # Tab 1: Circular Stopwatch Tracking Card (timer section)
-        with gr.TabItem("專注計時"):
-            with gr.Group(elem_classes="custom-card"):
-                gr.Markdown("### 專注時間注入")
+        # Tab 1: Circular Stopwatch Tracking Card (timer section) & Manual Log (side-by-side)
+        with gr.TabItem("🚀 專注注入"):
+            with gr.Tabs():
+                with gr.TabItem("⏱️ 專注計時"):
+                    with gr.Group(elem_classes="custom-card"):
+                        gr.Markdown("### 專注時間注入")
 
-                # --- Account selector ---
-                invest_dropdown = gr.Dropdown(
-                    choices=get_investment_choices(),
-                    label="選擇投資帳戶",
-                    value=service.investments[0]["name"] if service.investments else None,
-                    interactive=True
-                )
+                        # --- Account selector ---
+                        invest_dropdown = gr.Dropdown(
+                            choices=get_investment_choices(),
+                            label="選擇投資帳戶",
+                            value=service.investments[0]["name"] if service.investments else None,
+                            interactive=True
+                        )
 
-                # --- Item selector (shown only when account has item_label) ---
-                # Compute initial state (show all items, not just inProgress)
-                _init_inv = service.investments[0] if service.investments else None
-                _init_items = service.get_items(inv_id=_init_inv["id"]) if (_init_inv and _init_inv["item_label"]) else []
-                _init_has_label = bool(_init_inv and _init_inv["item_label"])
-                _init_label = _init_inv["item_label"] if _init_has_label else "項目"
+                        # --- Item selector (shown only when account has item_label) ---
+                        # Compute initial state (show all items, not just inProgress)
+                        _init_inv = service.investments[0] if service.investments else None
+                        _init_items = service.get_items(inv_id=_init_inv["id"]) if (_init_inv and _init_inv["item_label"]) else []
+                        _init_has_label = bool(_init_inv and _init_inv["item_label"])
+                        _init_label = _init_inv["item_label"] if _init_has_label else "項目"
 
-                with gr.Row():
-                    item_dropdown = gr.Dropdown(
-                        choices=[it["name"] for it in _init_items] if _init_items else [],
-                        label=f"選擇{_init_label}" if _init_has_label else "項目",
-                        visible=_init_has_label and bool(_init_items),
-                        interactive=True,
-                        scale=4
-                    )
-                    delete_item_quick_btn = gr.Button(
-                        "🗑️ 刪除項目",
-                        variant="stop",
-                        visible=_init_has_label and bool(_init_items),
-                        scale=1
-                    )
+                        with gr.Row():
+                            item_dropdown = gr.Dropdown(
+                                choices=[it["name"] for it in _init_items] if _init_items else [],
+                                label=f"選擇{_init_label}" if _init_has_label else "項目",
+                                visible=_init_has_label and bool(_init_items),
+                                interactive=True,
+                                scale=4
+                            )
+                            delete_item_quick_btn = gr.Button(
+                                "🗑️ 刪除項目",
+                                variant="stop",
+                                visible=_init_has_label and bool(_init_items),
+                                scale=1
+                            )
 
-                # Warning: account has item_label but no in-progress items
-                timer_item_warning = gr.HTML(
-                    value=f"<div style='display:flex;align-items:center;gap:8px;padding:10px 14px;background:#FFF7ED;border:1px solid #FDBA74;border-radius:10px;font-size:13px;color:#92400E;'>⚠️ 目前無進行中的{_init_label}，請先新增。</div>" if (_init_has_label and not _init_items) else "",
-                    visible=_init_has_label and not bool(_init_items)
-                )
+                        # Warning: account has item_label but no in-progress items
+                        timer_item_warning = gr.HTML(
+                            value=f"<div style='display:flex;align-items:center;gap:8px;padding:10px 14px;background:#FFF7ED;border:1px solid #FDBA74;border-radius:10px;font-size:13px;color:#92400E;'>⚠️ 目前無{_init_label}，請先新增。</div>" if (_init_has_label and not _init_items) else "",
+                            visible=_init_has_label and not bool(_init_items)
+                        )
 
-                # Inline quick-add (appears when no items)
-                with gr.Group(visible=_init_has_label and not bool(_init_items)) as timer_quick_add_group:
-                    with gr.Row():
-                        timer_quick_item_name = gr.Textbox(label=f"新增{_init_label}", placeholder=f"輸入{_init_label}名稱…", scale=4)
-                        timer_quick_add_btn = gr.Button("＋ 新增", variant="secondary", scale=1)
+                        # Inline quick-add (appears when no items)
+                        with gr.Group(visible=_init_has_label and not bool(_init_items)) as timer_quick_add_group:
+                            with gr.Row():
+                                timer_quick_item_name = gr.Textbox(label=f"新增{_init_label}", placeholder=f"輸入{_init_label}名稱…", scale=4)
+                                timer_quick_add_btn = gr.Button("＋ 新增", variant="secondary", scale=1)
 
-                # Action timer state
-                stopwatch_display = gr.HTML(value=get_stopwatch_html("00:00"))
-                timer_msg = gr.Textbox(label="當前狀態", value="準備投資", interactive=False)
+                        # Action timer state
+                        stopwatch_display = gr.HTML(value=get_stopwatch_html("00:00"))
+                        timer_msg = gr.Textbox(label="當前狀態", value="準備投資", interactive=False)
 
-                # Dynamic inputs during timer or settlement
-                with gr.Group(visible=True) as settle_panel:
-                    gr.Markdown("#### 結算投入進度")
-                    settle_start_pages = gr.Textbox(label="起始頁數 (本次開始讀的頁數)", visible=False, placeholder="例如：150")
-                    settle_progress = gr.Textbox(label="讀到第幾頁 (結束時的頁數)", visible=False, placeholder="例如：200")
-                    settle_total = gr.Textbox(label="總頁數", visible=False, placeholder="ignore")
-                    remarks = gr.Textbox(label="備忘備註", placeholder="寫下本次投入的重點...")
-                    settle_status = gr.Radio(
-                        choices=[("進行中", "inProgress"), ("已完成", "completed"), ("暫停中", "paused")],
-                        value="inProgress",
-                        label="結算後項目狀態",
-                        visible=_init_has_label
-                    )
+                        # Dynamic inputs during timer or settlement
+                        with gr.Group(visible=True) as settle_panel:
+                            gr.Markdown("#### 結算投入進度")
+                            settle_start_pages = gr.Textbox(label="起始頁數 (本次開始讀的頁數)", visible=False, placeholder="例如：150")
+                            settle_progress = gr.Textbox(label="讀到第幾頁 (結束時的頁數)", visible=False, placeholder="例如：200")
+                            settle_total = gr.Textbox(label="總頁數", visible=False, placeholder="ignore")
+                            remarks = gr.Textbox(label="備忘備註", placeholder="寫下本次投入的重點...")
+                            settle_status = gr.Radio(
+                                choices=[("進行中", "inProgress"), ("已完成", "completed"), ("暫停中", "paused")],
+                                value="inProgress",
+                                label="結算後項目狀態",
+                                visible=_init_has_label
+                            )
 
-                with gr.Row():
-                    start_btn = gr.Button("開始注入", variant="primary")
-                    pause_btn = gr.Button("暫停", variant="secondary")
-                    settle_btn = gr.Button("結算入帳", variant="stop")
-                    discard_btn = gr.Button("放棄本次", variant="secondary")
+                        with gr.Row():
+                            start_btn = gr.Button("開始注入", variant="primary")
+                            pause_btn = gr.Button("暫停", variant="secondary")
+                            settle_btn = gr.Button("結算入帳", variant="stop")
+                            discard_btn = gr.Button("放棄本次", variant="secondary")
 
-                # Hidden Timer for tick
-                stopwatch_trigger = gr.Timer(active=False, value=1)
+                        # Hidden Timer for tick
+                        stopwatch_trigger = gr.Timer(active=False, value=1)
 
-        # Tab 2: Manual Entry
-        with gr.TabItem("手動記錄"):
-            with gr.Group(elem_classes="custom-card"):
-                gr.Markdown("### 手動記錄投入")
-                manual_invest_dropdown = gr.Dropdown(
-                    choices=get_investment_choices(),
-                    label="選擇投資帳戶",
-                    value=service.investments[0]["name"] if service.investments else None
-                )
-                
-                # Check initial items for default selection (show all items)
-                init_choices = []
-                init_visible = False
-                init_label = "項目"
-                if service.investments:
-                    default_inv = service.investments[0]
-                    if default_inv["item_label"]:
-                        init_choices = [it["name"] for it in service.get_items(inv_id=default_inv["id"])]
-                        init_visible = True
-                        init_label = default_inv["item_label"]
+                with gr.TabItem("📝 手動補記"):
+                    with gr.Group(elem_classes="custom-card"):
+                        gr.Markdown("### 手動記錄投入")
+                        manual_invest_dropdown = gr.Dropdown(
+                            choices=get_investment_choices(),
+                            label="選擇投資帳戶",
+                            value=service.investments[0]["name"] if service.investments else None
+                        )
                         
-                manual_item_dropdown = gr.Dropdown(choices=init_choices, visible=init_visible, label=init_label)
-                
-                manual_start = gr.Textbox(label="開始時間 (YYYY-MM-DD HH:MM)", placeholder="例如: 2026-06-29 14:00")
-                manual_end = gr.Textbox(label="結束時間 (YYYY-MM-DD HH:MM)", placeholder="例如: 2026-06-29 15:30")
-                manual_remarks = gr.Textbox(label="投入備忘")
-                manual_submit = gr.Button("手動入帳", variant="secondary")
+                        # Check initial items for default selection (show all items)
+                        init_choices = []
+                        init_visible = False
+                        init_label = "項目"
+                        if service.investments:
+                            default_inv = service.investments[0]
+                            if default_inv["item_label"]:
+                                init_choices = [it["name"] for it in service.get_items(inv_id=default_inv["id"])]
+                                init_visible = True
+                                init_label = default_inv["item_label"]
+                                
+                        manual_item_dropdown = gr.Dropdown(choices=init_choices, visible=init_visible, label=init_label)
+                        
+                        manual_start = gr.Textbox(label="開始時間 (YYYY-MM-DD HH:MM)", placeholder="例如: 2026-06-29 14:00")
+                        manual_end = gr.Textbox(label="結束時間 (YYYY-MM-DD HH:MM)", placeholder="例如: 2026-06-29 15:30")
+                        manual_remarks = gr.Textbox(label="投入備忘")
+                        manual_submit = gr.Button("手動入帳", variant="secondary")
 
-        # Tab 3: Project Items management
-        with gr.TabItem("項目管理"):
+        # Tab 2: Project Board solely displaying the tracker
+        with gr.TabItem("📈 資產清單"):
             with gr.Group(elem_classes="custom-card"):
                 gr.Markdown("### 項目追蹤看板")
                 with gr.Row():
@@ -956,175 +957,176 @@ with gr.Blocks(theme=theme, css=custom_css, title="時光投資簿 timeVest") as
                 items_refresh_btn = gr.Button("整理列表", variant="secondary")
                 items_display_html = gr.HTML()
 
-            # Inline creator
-            with gr.Group(elem_classes="custom-card"):
-                gr.Markdown("### 新增追蹤項目")
-                new_item_name = gr.Textbox(label="項目名稱", placeholder="如: 《深度工作力》")
-                new_item_total = gr.Textbox(label="總頁數 (若無則不填)", placeholder="例如: 300")
-                new_item_btn = gr.Button("建立新項目", variant="secondary")
-                new_item_status = gr.Markdown()
-
-            # Historical edit panel
-            with gr.Group(elem_classes="custom-card"):
-                gr.Markdown("### 歷史專注紀錄修改")
-                with gr.Row():
-                    hist_start_date = gr.Textbox(
-                        label="開始日期 (YYYY-MM-DD)", 
-                        value=(datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d"), 
-                        placeholder="例如: 2026-06-01"
-                    )
-                    hist_end_date = gr.Textbox(
-                        label="結束日期 (YYYY-MM-DD)", 
-                        value=datetime.now().strftime("%Y-%m-%d"), 
-                        placeholder="例如: 2026-06-30"
-                    )
-                    hist_inv_dropdown = gr.Dropdown(
-                        choices=get_investment_choices(),
-                        label="選擇投資帳戶",
-                        value=service.investments[0]["name"] if service.investments else None
-                    )
-                hist_fetch_btn = gr.Button("讀取此區間紀錄", variant="secondary")
-                
-                hist_log_selector = gr.Dropdown(
-                    choices=[],
-                    label="選擇要修改的紀錄",
-                    visible=False,
-                    interactive=True
-                )
-                
-                with gr.Group(visible=False) as hist_edit_inputs_group:
-                    gr.Markdown("#### 編輯選定紀錄")
-                    with gr.Row():
-                        hist_edit_item_name = gr.Textbox(label="項目名稱", placeholder="手動輸入項目名稱，例如: 小島經濟學")
-                        hist_edit_progress = gr.Textbox(label="進度值 (百分比或頁數)", placeholder="例如: 180 或 45")
-                        hist_edit_total = gr.Textbox(label="總頁數 (若無則不填)", placeholder="例如: 300")
-                    hist_edit_detail = gr.Textbox(label="投入備忘/細節說明", placeholder="更新該筆投入的備忘細節...")
-                    with gr.Row():
-                        hist_update_btn = gr.Button("更新此筆歷史紀錄", variant="primary")
-                        hist_delete_btn = gr.Button("刪除此筆歷史紀錄", variant="stop")
-                    hist_update_status = gr.Markdown()
-
-            # Update item progress panel
-            with gr.Group(elem_classes="custom-card"):
-                gr.Markdown("### 更新項目進度")
-                with gr.Row():
-                    update_item_inv_dropdown = gr.Dropdown(
-                        choices=get_investment_choices(),
-                        label="選擇投資帳戶",
-                        value=service.investments[0]["name"] if service.investments else None
-                    )
-                    
-                    # Populate initial choices
-                    _init_upd_choices = []
-                    if service.investments:
-                        _init_upd_items = service.get_items(inv_id=service.investments[0]["id"])
-                        _init_upd_choices = [it["name"] for it in _init_upd_items]
+        # Tab 3: Yield reports & Wrapped Statement
+        with gr.TabItem("🏆 收益與對帳"):
+            with gr.Tabs():
+                with gr.TabItem("🎁 專注收益"):
+                    with gr.Group(elem_classes="custom-card"):
+                        gr.Markdown("### 成果與報告")
+                        yields_tab_selector = gr.Radio(
+                            choices=["成果匯報", "成果報告"],
+                            value="成果匯報",
+                            label="收益報告分類"
+                        )
                         
-                    update_item_dropdown = gr.Dropdown(
-                        choices=_init_upd_choices,
-                        label="選擇項目"
-                    )
-                with gr.Row():
-                    update_item_progress = gr.Textbox(label="當前進度值 (頁數或百分比)", placeholder="例如: 180 或 45")
-                    update_item_total = gr.Textbox(label="總頁數 (若無則修改，空白代表不修改)", placeholder="例如: 300")
-                    update_item_status_radio = gr.Radio(
-                        choices=[("進行中", "inProgress"), ("已完成", "completed"), ("暫停中", "paused")],
-                        value="inProgress",
-                        label="項目狀態"
-                    )
-                update_item_btn = gr.Button("更新進度", variant="primary")
-                update_item_status = gr.Markdown()
-
-            # Delete item panel
-            with gr.Group(elem_classes="custom-card"):
-                gr.Markdown("### 刪除追蹤項目")
-                with gr.Row():
-                    delete_item_inv_dropdown = gr.Dropdown(
-                        choices=get_investment_choices(),
-                        label="選擇投資帳戶",
-                        value=service.investments[0]["name"] if service.investments else None
-                    )
-                    
-                    # Populate initial choices for first investment
-                    _init_del_choices = []
-                    if service.investments:
-                        _init_del_items = service.get_items(inv_id=service.investments[0]["id"])
-                        _init_del_choices = [it["name"] for it in _init_del_items]
+                        # Date filter for monthly summaries
+                        with gr.Row(visible=False) as report_date_row:
+                            start_date_picker = gr.Textbox(label="開始日期 (YYYY-MM-DD)", value=(datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d"))
+                            end_date_picker = gr.Textbox(label="結束日期 (YYYY-MM-DD)", value=datetime.now().strftime("%Y-%m-%d"))
                         
-                    delete_item_dropdown = gr.Dropdown(
-                        choices=_init_del_choices,
-                        label="選擇要刪除的項目"
-                    )
-                delete_item_btn = gr.Button("刪除項目", variant="stop")
-                delete_item_status = gr.Markdown()
+                        yields_refresh_btn = gr.Button("整理報告", variant="secondary")
+                        yields_display_html = gr.HTML()
 
-        # Tab 4: Yields Timeline (Milestones & Reports)
-        with gr.TabItem("投資收益"):
-            with gr.Group(elem_classes="custom-card"):
-                gr.Markdown("### 成果與報告")
-                yields_tab_selector = gr.Radio(
-                    choices=["成果匯報", "成果報告"],
-                    value="成果匯報",
-                    label="收益報告分類"
-                )
-                
-                # Date filter for monthly summaries
-                with gr.Row(visible=False) as report_date_row:
-                    start_date_picker = gr.Textbox(label="開始日期 (YYYY-MM-DD)", value=(datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d"))
-                    end_date_picker = gr.Textbox(label="結束日期 (YYYY-MM-DD)", value=datetime.now().strftime("%Y-%m-%d"))
-                
-                yields_refresh_btn = gr.Button("整理報告", variant="secondary")
-                yields_display_html = gr.HTML()
+                with gr.TabItem("📊 時光對帳單"):
+                    with gr.Group(elem_classes="custom-card"):
+                        gr.Markdown("### 自律對帳結算")
+                        with gr.Row():
+                            statement_start_date = gr.Textbox(
+                                label="對帳開始日期 (YYYY-MM-DD)", 
+                                value=(datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d"), 
+                                placeholder="例如: 2026-01-01"
+                            )
+                            statement_end_date = gr.Textbox(
+                                label="對帳結束日期 (YYYY-MM-DD)", 
+                                value=datetime.now().strftime("%Y-%m-%d"), 
+                                placeholder="例如: 2026-12-31"
+                            )
+                        statement_generate_btn = gr.Button("產生時光對帳單", variant="primary")
+                        statement_display_html = gr.HTML()
 
-        # Tab 5: Spotify-Wrapped style Financial Statement
-        with gr.TabItem("時光對帳單"):
-            with gr.Group(elem_classes="custom-card"):
-                gr.Markdown("### 自律對帳結算")
-                with gr.Row():
-                    statement_start_date = gr.Textbox(
-                        label="對帳開始日期 (YYYY-MM-DD)", 
-                        value=(datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d"), 
-                        placeholder="例如: 2026-01-01"
-                    )
-                    statement_end_date = gr.Textbox(
-                        label="對帳結束日期 (YYYY-MM-DD)", 
-                        value=datetime.now().strftime("%Y-%m-%d"), 
-                        placeholder="例如: 2026-12-31"
-                    )
-                statement_generate_btn = gr.Button("產生時光對帳單", variant="primary")
-                statement_display_html = gr.HTML()
+        # Tab 4: Control Center consolidates CRUD actions
+        with gr.TabItem("⚙️ 控制中心"):
+            with gr.Tabs():
+                with gr.TabItem("📂 帳戶管理"):
+                    with gr.Group(elem_classes="custom-card"):
+                        gr.Markdown("### 投資帳戶增刪")
+                        new_inv_name = gr.Textbox(label="帳戶名稱", placeholder="例如: 日常閱讀")
+                        new_inv_icon = gr.Dropdown(
+                            choices=[
+                                ("📖 書本 (book.fill)", "book.fill"),
+                                ("🎸 吉他 (guitars.fill)", "guitars.fill"),
+                                ("🏋️ 啞鈴 (dumbbell.fill)", "dumbbell.fill"),
+                                ("🏃 跑步 (figure.run)", "figure.run"),
+                                ("💻 電腦 (laptopcomputer)", "laptopcomputer")
+                            ],
+                            value="book.fill",
+                            label="圖示"
+                        )
+                        new_inv_color = gr.ColorPicker(value="#E2B659", label="代表顏色")
+                        new_inv_prog = gr.Radio(choices=["pages", "percentage", "none"], value="none", label="進度模式")
+                        new_inv_label = gr.Textbox(label="項目標籤 (如: 書籍, 曲目, 課程) 空白則為時間累積型")
+                        
+                        add_inv_btn = gr.Button("開立新投資帳戶", variant="primary")
+                        
+                        delete_inv_dropdown = gr.Dropdown(
+                            choices=get_investment_choices(),
+                            label="選擇要銷戶的帳戶"
+                        )
+                        delete_inv_btn = gr.Button("銷戶並清空項目", variant="stop")
+                        
+                        settings_status = gr.Markdown()
 
-        # Tab 6: Account settings
-        with gr.TabItem("帳戶管理"):
-            with gr.Group(elem_classes="custom-card"):
-                gr.Markdown("### 投資帳戶增刪")
-                new_inv_name = gr.Textbox(label="帳戶名稱", placeholder="例如: 日常閱讀")
-                new_inv_icon = gr.Dropdown(
-                    choices=[
-                        ("📖 書本 (book.fill)", "book.fill"),
-                        ("🎸 吉他 (guitars.fill)", "guitars.fill"),
-                        ("🏋️ 啞鈴 (dumbbell.fill)", "dumbbell.fill"),
-                        ("🏃 跑步 (figure.run)", "figure.run"),
-                        ("💻 電腦 (laptopcomputer)", "laptopcomputer")
-                    ],
-                    value="book.fill",
-                    label="圖示"
-                )
-                new_inv_color = gr.ColorPicker(value="#E2B659", label="代表顏色")
-                new_inv_prog = gr.Radio(choices=["pages", "percentage", "none"], value="none", label="進度模式")
-                new_inv_label = gr.Textbox(label="項目標籤 (如: 書籍, 曲目, 課程) 空白則為時間累積型")
-                
-                add_inv_btn = gr.Button("開立新投資帳戶", variant="primary")
-                
-                delete_inv_dropdown = gr.Dropdown(
-                    choices=get_investment_choices(),
-                    label="選擇要銷戶的帳戶"
-                )
-                delete_inv_btn = gr.Button("銷戶並清空項目", variant="stop")
-                
-                settings_status = gr.Markdown()
+                with gr.TabItem("📂 項目管理"):
+                    with gr.Group(elem_classes="custom-card"):
+                        gr.Markdown("### 新增追蹤項目")
+                        new_item_name = gr.Textbox(label="項目名稱", placeholder="如: 《深度工作力》")
+                        new_item_total = gr.Textbox(label="總頁數 (若無則不填)", placeholder="例如: 300")
+                        new_item_btn = gr.Button("建立新項目", variant="secondary")
+                        new_item_status = gr.Markdown()
 
-    invest_dropdown.change(
+                    with gr.Group(elem_classes="custom-card"):
+                        gr.Markdown("### 更新項目進度")
+                        with gr.Row():
+                            update_item_inv_dropdown = gr.Dropdown(
+                                choices=get_investment_choices(),
+                                label="選擇投資帳戶",
+                                value=service.investments[0]["name"] if service.investments else None
+                            )
+                            
+                            # Populate initial choices
+                            _init_upd_choices = []
+                            if service.investments:
+                                _init_upd_items = service.get_items(inv_id=service.investments[0]["id"])
+                                _init_upd_choices = [it["name"] for it in _init_upd_items]
+                                
+                            update_item_dropdown = gr.Dropdown(
+                                choices=_init_upd_choices,
+                                label="選擇項目"
+                            )
+                        with gr.Row():
+                            update_item_progress = gr.Textbox(label="當前進度值 (頁數或百分比)", placeholder="例如: 180 或 45")
+                            update_item_total = gr.Textbox(label="總頁數 (若無則修改，空白代表不修改)", placeholder="例如: 300")
+                            update_item_status_radio = gr.Radio(
+                                choices=[("進行中", "inProgress"), ("已完成", "completed"), ("暫停中", "paused")],
+                                value="inProgress",
+                                label="項目狀態"
+                            )
+                        update_item_btn = gr.Button("更新進度", variant="primary")
+                        update_item_status = gr.Markdown()
+
+                    with gr.Group(elem_classes="custom-card"):
+                        gr.Markdown("### 刪除追蹤項目")
+                        with gr.Row():
+                            delete_item_inv_dropdown = gr.Dropdown(
+                                choices=get_investment_choices(),
+                                label="選擇投資帳戶",
+                                value=service.investments[0]["name"] if service.investments else None
+                            )
+                            
+                            # Populate initial choices for first investment
+                            _init_del_choices = []
+                            if service.investments:
+                                _init_del_items = service.get_items(inv_id=service.investments[0]["id"])
+                                _init_del_choices = [it["name"] for it in _init_del_items]
+                                
+                            delete_item_dropdown = gr.Dropdown(
+                                choices=_init_del_choices,
+                                label="選擇要刪除的項目"
+                            )
+                        delete_item_btn = gr.Button("刪除項目", variant="stop")
+                        delete_item_status = gr.Markdown()
+
+                with gr.TabItem("📝 歷史修正"):
+                    with gr.Group(elem_classes="custom-card"):
+                        gr.Markdown("### 歷史專注紀錄修改")
+                        with gr.Row():
+                            hist_start_date = gr.Textbox(
+                                label="開始日期 (YYYY-MM-DD)", 
+                                value=(datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d"), 
+                                placeholder="例如: 2026-06-01"
+                            )
+                            hist_end_date = gr.Textbox(
+                                label="結束日期 (YYYY-MM-DD)", 
+                                value=datetime.now().strftime("%Y-%m-%d"), 
+                                placeholder="例如: 2026-06-30"
+                            )
+                            hist_inv_dropdown = gr.Dropdown(
+                                choices=get_investment_choices(),
+                                label="選擇投資帳戶",
+                                value=service.investments[0]["name"] if service.investments else None
+                            )
+                        hist_fetch_btn = gr.Button("讀取此區間紀錄", variant="secondary")
+                        
+                        hist_log_selector = gr.Dropdown(
+                            choices=[],
+                            label="選擇要修改的紀錄",
+                            visible=False,
+                            interactive=True
+                        )
+                        
+                        with gr.Group(visible=False) as hist_edit_inputs_group:
+                            gr.Markdown("#### 編輯選定紀錄")
+                            with gr.Row():
+                                hist_edit_item_name = gr.Textbox(label="項目名稱", placeholder="手動輸入項目名稱，例如: 小島經濟學")
+                                hist_edit_progress = gr.Textbox(label="進度值 (百分比或頁數)", placeholder="例如: 180 或 45")
+                                hist_edit_total = gr.Textbox(label="總頁數 (若無則不填)", placeholder="例如: 300")
+                            hist_edit_detail = gr.Textbox(label="投入備忘/細節說明", placeholder="更新該筆投入的備忘細節...")
+                            with gr.Row():
+                                hist_update_btn = gr.Button("更新此筆歷史紀錄", variant="primary")
+                                hist_delete_btn = gr.Button("刪除此筆歷史紀錄", variant="stop")
+                            hist_update_status = gr.Markdown()
+
+        invest_dropdown.change(
         fn=get_timer_item_panel_state,
         inputs=[invest_dropdown],
         outputs=[item_dropdown, timer_item_warning, timer_quick_add_group, timer_quick_item_name, settle_status, delete_item_quick_btn]
