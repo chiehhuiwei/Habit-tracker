@@ -57,6 +57,61 @@ class TimeVestService:
         self.investments = load_json(INVESTMENTS_FILE, DEFAULT_INVESTMENTS)
         self.items = load_json(ITEMS_FILE, [])
         self.milestones = load_json(MILESTONES_FILE, [])
+        self.deduplicate_items()
+
+    def deduplicate_items(self):
+        """Deduplicates items in-memory and saves back to ITEMS_FILE if duplicates were found.
+        Groups by (investment_id, clean_name) and merges progress, total, status, and created_at."""
+        grouped = {}
+        for item in self.items:
+            key = (item["investment_id"], item["name"].strip().lower())
+            grouped.setdefault(key, []).append(item)
+            
+        new_items = []
+        changed = False
+        for key, group in grouped.items():
+            if len(group) == 1:
+                new_items.append(group[0])
+            else:
+                # Merge duplicate items
+                changed = True
+                main_item = group[0]
+                # Find maximum progress and non-null total
+                max_progress = main_item.get("progress", 0.0)
+                best_total = main_item.get("total")
+                best_status = main_item.get("status", "inProgress")
+                earliest_created = main_item.get("created_at")
+                
+                for other in group[1:]:
+                    prog = other.get("progress", 0.0)
+                    if prog > max_progress:
+                        max_progress = prog
+                    if other.get("total") is not None:
+                        try:
+                            other_total = float(other.get("total"))
+                            if best_total is None or other_total > float(best_total):
+                                best_total = other_total
+                        except (ValueError, TypeError):
+                            pass
+                    # If any is completed, mark completed
+                    if other.get("status") == "completed" or best_status == "completed":
+                        best_status = "completed"
+                    elif other.get("status") == "inProgress" and best_status == "paused":
+                        best_status = "inProgress"
+                    # Keep earliest created_at
+                    if other.get("created_at") and (not earliest_created or other["created_at"] < earliest_created):
+                        earliest_created = other["created_at"]
+                        
+                main_item["progress"] = max_progress
+                main_item["total"] = best_total
+                main_item["status"] = best_status
+                main_item["created_at"] = earliest_created
+                new_items.append(main_item)
+                
+        if changed:
+            self.items = new_items
+            save_json(ITEMS_FILE, self.items)
+            print(f"Deduplicated items: original count was {len(self.items) + (len(grouped) - len(new_items))}, new count is {len(self.items)}")
 
     def upgrade_schema(self):
         """Checks and adds item tracking columns to BigQuery schema if they don't exist."""
@@ -114,10 +169,15 @@ class TimeVestService:
         return items_list
 
     def add_item(self, inv_id, name, total=None):
+        clean_name = name.strip()
+        existing = next((it for it in self.items if it["investment_id"] == inv_id and it["name"].strip().lower() == clean_name.lower()), None)
+        if existing:
+            return existing
+
         new_item = {
             "id": str(uuid.uuid4()),
             "investment_id": inv_id,
-            "name": name,
+            "name": clean_name,
             "total": total,
             "progress": 0.0,
             "status": "inProgress", # inProgress, completed, paused
