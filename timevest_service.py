@@ -375,13 +375,36 @@ class TimeVestService:
         allocations = []
         try:
             df = self.bq_client.query(query).to_dataframe()
-            total_sec = float(df['total_sec'].sum())
+            # Clean up duration_second
+            df['total_sec'] = df['total_sec'].fillna(0.0).astype(float)
+            
+            # Normalize habit names to ensure old and new schemas match (e.g. "日常閱讀" and "閱讀" are grouped)
+            def normalize_name(name):
+                if not name:
+                    return "未知"
+                if "閱讀" in name:
+                    return "閱讀"
+                if "健身" in name or "Gym" in name or "Strength" in name:
+                    return "健身"
+                if "吉他" in name:
+                    return "吉他"
+                return name
+
+            df['norm_name'] = df['habit_name'].apply(normalize_name)
+            grouped_df = df.groupby('norm_name')['total_sec'].sum().reset_index()
+            total_sec = float(grouped_df['total_sec'].sum())
+            
             if total_sec > 0:
-                for _, row in df.iterrows():
-                    inv = next((i for i in self.investments if i["name"] == row['habit_name']), None)
+                for _, row in grouped_df.iterrows():
+                    norm_n = row['norm_name']
+                    # Look up matching investment account (first exact, then containing)
+                    inv = next((i for i in self.investments if i["name"] == norm_n), None)
+                    if not inv:
+                        inv = next((i for i in self.investments if norm_n in i["name"] or i["name"] in norm_n), None)
+                    
                     pct = float(row['total_sec']) / total_sec
                     allocations.append({
-                        "name": row['habit_name'],
+                        "name": inv["name"] if inv else norm_n,
                         "hours": float(row['total_sec']) / 3600.0,
                         "percentage": pct,
                         "color": inv["color"] if inv else "#94A3B8"
@@ -531,11 +554,19 @@ class TimeVestService:
             print(f"Monthly summary engine failed: {e}")
 
     def get_activities_by_range(self, start_date, end_date, habit_name):
+        # Expand name matching to support data compatibility (e.g. "閱讀" matches both "閱讀" and "日常閱讀")
+        if "閱讀" in habit_name:
+            name_filter = "habit_name IN ('閱讀', '日常閱讀')"
+        elif "健身" in habit_name:
+            name_filter = "habit_name IN ('健身', 'Gym', 'Strength')"
+        else:
+            name_filter = f"habit_name = '{habit_name}'"
+
         query = f"""
             SELECT id, start_time, habit_name, detail, item_name, progress_snapshot, total_pages, duration_second
             FROM `{self.table_id}`
             WHERE DATE(start_time) >= '{start_date}' AND DATE(start_time) <= '{end_date}'
-              AND habit_name = '{habit_name}'
+              AND {name_filter}
             ORDER BY start_time DESC
         """
         try:
