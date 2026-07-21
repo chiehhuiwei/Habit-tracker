@@ -668,6 +668,46 @@ def dynamic_update_items_dropdown(inv_name):
     items = service.get_items(inv_id=inv["id"])  # show all items regardless of status
     return gr.update(choices=[it["name"] for it in items], visible=True, label=inv["item_label"])
 
+def get_manual_progress_panel_state(inv_name, item_name):
+    inv = next((i for i in service.investments if i["name"] == inv_name), None)
+    if not inv or inv["progress_type"] == "none" or not item_name:
+        return (
+            gr.update(visible=False),
+            gr.update(visible=False),
+            gr.update(visible=False),
+            gr.update(visible=False)
+        )
+    
+    item = next((it for it in service.items if it["investment_id"] == inv["id"] and it["name"] == item_name), None)
+    status_update = gr.update(visible=True, value=item["status"] if item else "inProgress")
+    
+    if inv["progress_type"] == "pages":
+        cur_page = ""
+        if item and item.get("total") and item.get("progress") is not None:
+            cur_page = str(int(round(item["progress"] * item["total"])))
+        return (
+            gr.update(visible=True, label="起始頁數 (本次開始讀的頁數)", placeholder="例如：150", value=cur_page),
+            gr.update(visible=True, label="讀到第幾頁 (結束時的頁數)", placeholder="例如：200", value=cur_page),
+            gr.update(visible=True, label="總頁數", placeholder="例如：300", value=str(int(item.get("total") or 300))),
+            status_update
+        )
+    elif inv["progress_type"] == "percentage":
+        cur_percent = ""
+        if item and item.get("progress") is not None:
+            cur_percent = str(int(round(item["progress"] * 100)))
+        return (
+            gr.update(visible=False),
+            gr.update(visible=True, label="目前累計進度 (%)", placeholder="例如：80", value=cur_percent),
+            gr.update(visible=False),
+            status_update
+        )
+    return (
+        gr.update(visible=False),
+        gr.update(visible=False),
+        gr.update(visible=False),
+        gr.update(visible=False)
+    )
+
 def get_timer_item_panel_state(inv_name):
     """Returns (item_dropdown update, warning_html update, quick_add_group update, quick_add_label, settle_status update, delete_btn update) """
     inv = next((i for i in service.investments if i["name"] == inv_name), None)
@@ -960,6 +1000,17 @@ with gr.Blocks(theme=theme, css=custom_css, title="時光投資簿 timeVest") as
                         manual_start = gr.Textbox(label="開始時間 (YYYY-MM-DD HH:MM)", placeholder="例如: 2026-06-29 14:00")
                         manual_end = gr.Textbox(label="結束時間 (YYYY-MM-DD HH:MM)", placeholder="例如: 2026-06-29 15:30")
                         manual_remarks = gr.Textbox(label="投入備忘")
+                        
+                        manual_start_pages = gr.Textbox(label="起始頁數", visible=False)
+                        manual_progress = gr.Textbox(label="進度值", visible=False)
+                        manual_total = gr.Textbox(label="總頁數", visible=False)
+                        manual_status = gr.Radio(
+                            choices=[("進行中", "inProgress"), ("已完成", "completed"), ("暫停中", "paused")],
+                            value="inProgress",
+                            label="項目狀態",
+                            visible=False
+                        )
+                        
                         manual_submit = gr.Button("手動入帳", variant="secondary")
 
         # Tab 2: Project Board solely displaying the tracker
@@ -1213,10 +1264,27 @@ with gr.Blocks(theme=theme, css=custom_css, title="時光投資簿 timeVest") as
         outputs=[item_dropdown, timer_item_warning, timer_quick_add_group, timer_quick_item_name, settle_status, delete_item_quick_btn, timer_msg]
     )
 
+    def handle_manual_invest_change(inv_name):
+        item_update = dynamic_update_items_dropdown(inv_name)
+        inv = next((i for i in service.investments if i["name"] == inv_name), None)
+        first_item_name = None
+        if inv and inv["item_label"]:
+            items = service.get_items(inv_id=inv["id"])
+            if items:
+                first_item_name = items[0]["name"]
+        m_start_pages, m_progress, m_total, m_status = get_manual_progress_panel_state(inv_name, first_item_name)
+        return item_update, m_start_pages, m_progress, m_total, m_status
+
     manual_invest_dropdown.change(
-        fn=dynamic_update_items_dropdown,
+        fn=handle_manual_invest_change,
         inputs=[manual_invest_dropdown],
-        outputs=[manual_item_dropdown]
+        outputs=[manual_item_dropdown, manual_start_pages, manual_progress, manual_total, manual_status]
+    )
+
+    manual_item_dropdown.change(
+        fn=get_manual_progress_panel_state,
+        inputs=[manual_invest_dropdown, manual_item_dropdown],
+        outputs=[manual_start_pages, manual_progress, manual_total, manual_status]
     )
 
     # Timer actions
@@ -1276,39 +1344,88 @@ with gr.Blocks(theme=theme, css=custom_css, title="時光投資簿 timeVest") as
     )
 
     # Manual entry
-    def run_manual_entry(inv_name, item_name, start_s, end_s, rems):
+    def run_manual_entry(inv_name, item_name, start_s, end_s, rems, start_pages_val, progress_val, total_val, status_val):
         inv = next((i for i in service.investments if i["name"] == inv_name), None)
         if not inv:
             return "請選擇帳戶"
         item = None
         if inv["item_label"] and item_name:
-            item = next((it for it in service.items if it["name"] == item_name), None)
+            item = next((it for it in service.items if it["name"] == item_name and it["investment_id"] == inv["id"]), None)
             
         try:
             start_t = datetime.strptime(start_s.strip(), "%Y-%m-%d %H:%M")
+            start_t = start_t.replace(tzinfo=ZoneInfo("Asia/Taipei"))
             end_t = datetime.strptime(end_s.strip(), "%Y-%m-%d %H:%M")
+            end_t = end_t.replace(tzinfo=ZoneInfo("Asia/Taipei"))
             duration = int((end_t - start_t).total_seconds())
             if duration <= 0:
                 return "結束時間必須晚於開始時間"
         except Exception as e:
             return f"時間格式錯誤: {e}"
             
+        # Update progress and status if tracking progress
+        progress_snapshot = None
+        pages_read_detail = ""
+        if inv["progress_type"] != "none" and item:
+            try:
+                if inv["progress_type"] == "pages":
+                    cur = float(progress_val)
+                    tot = float(total_val)
+                    if tot > 0:
+                        progress_snapshot = min(cur / tot, 1.0)
+                        item["total"] = tot
+                        item["progress"] = progress_snapshot
+                        from timevest_service import save_json, ITEMS_FILE
+                        save_json(ITEMS_FILE, service.items)
+                        try:
+                            start_p = float(start_pages_val) if start_pages_val and str(start_pages_val).strip() else None
+                            if start_p is not None:
+                                pages_read = int(cur - start_p)
+                                pages_read_detail = f"讀至第 {int(cur)} 頁（本次讀了 {pages_read} 頁，第 {int(start_p)}–{int(cur)} 頁）"
+                            else:
+                                pages_read_detail = f"讀至第 {int(cur)} 頁"
+                        except:
+                            pages_read_detail = f"讀至第 {int(cur)} 頁"
+                elif inv["progress_type"] == "percentage":
+                    progress_snapshot = min(float(progress_val) / 100.0, 1.0)
+                    item["progress"] = progress_snapshot
+                    from timevest_service import save_json, ITEMS_FILE
+                    save_json(ITEMS_FILE, service.items)
+                    pages_read_detail = f"進度更新至 {int(float(progress_val))}%"
+            except Exception as pe:
+                print(f"Error parsing progress in manual entry: {pe}")
+                
+            final_status = "completed" if (progress_snapshot is not None and progress_snapshot >= 1.0) else status_val
+            service.set_item_status(item["id"], final_status)
+            
+        # Combine pages detail with remarks
+        final_detail = rems if rems else "手動記錄投入"
+        if pages_read_detail:
+            if rems:
+                final_detail = f"{pages_read_detail}｜{rems}"
+            else:
+                final_detail = pages_read_detail
+            
         success, ms_list = service.log_activity(
             inv_id=inv["id"],
             item_id=item["id"] if item else None,
             duration_seconds=duration,
-            detail=rems if rems else "手動記錄投入",
+            detail=final_detail,
             start_time=start_t,
             end_time=end_t
         )
         msg = "手動登錄成功！"
         if ms_list:
-            msg += "\n解鎖里程碑！" + "\n".join([item["title"] for item in ms_list])
+            msg += "\n解鎖里程碑！" + "\n".join([it["title"] for it in ms_list])
         return msg
 
     manual_submit.click(
         fn=run_manual_entry,
-        inputs=[manual_invest_dropdown, manual_item_dropdown, manual_start, manual_end, manual_remarks],
+        inputs=[
+            manual_invest_dropdown, manual_item_dropdown,
+            manual_start, manual_end, manual_remarks,
+            manual_start_pages, manual_progress, manual_total, manual_status
+        ],
         outputs=[timer_msg]
     )
 
@@ -1681,17 +1798,58 @@ with gr.Blocks(theme=theme, css=custom_css, title="時光投資簿 timeVest") as
         service.milestones = load_json(MILESTONES_FILE, [])
         service.deduplicate_items()
         choices = get_investment_choices()
+        
+        # Initialize manual progress values
+        default_inv = service.investments[0] if service.investments else None
+        default_items = service.get_items(inv_id=default_inv["id"]) if (default_inv and default_inv["item_label"]) else []
+        default_item = default_items[0] if default_items else None
+        
+        m_start_pages_vis = False
+        m_progress_vis = False
+        m_total_vis = False
+        m_status_vis = False
+        m_start_pages_val = ""
+        m_progress_val = ""
+        m_total_val = "300"
+        m_status_val = "inProgress"
+        m_progress_label = "進度值"
+        
+        if default_inv and default_inv["progress_type"] != "none" and default_item:
+            m_status_vis = True
+            m_status_val = default_item["status"]
+            if default_inv["progress_type"] == "pages":
+                m_start_pages_vis = True
+                m_progress_vis = True
+                m_total_vis = True
+                if default_item.get("total") and default_item.get("progress") is not None:
+                    cur_page = str(int(round(default_item["progress"] * default_item["total"])))
+                    m_start_pages_val = cur_page
+                    m_progress_val = cur_page
+                m_total_val = str(int(default_item.get("total") or 300))
+            elif default_inv["progress_type"] == "percentage":
+                m_progress_vis = True
+                m_progress_label = "目前累計進度 (%)"
+                if default_item.get("progress") is not None:
+                    m_progress_val = str(int(round(default_item["progress"] * 100)))
+        
         return (
             gr.update(choices=choices, value=service.investments[0]["name"] if service.investments else None),
             gr.update(choices=choices, value=service.investments[0]["name"] if service.investments else None),
             gr.update(choices=choices, value=service.investments[0]["name"] if service.investments else None),
             gr.update(choices=choices, value=service.investments[0]["name"] if service.investments else None),
             gr.update(choices=choices),
+            gr.update(visible=m_start_pages_vis, value=m_start_pages_val),
+            gr.update(visible=m_progress_vis, label=m_progress_label, value=m_progress_val),
+            gr.update(visible=m_total_vis, value=m_total_val),
+            gr.update(visible=m_status_vis, value=m_status_val)
         )
 
     app.load(
         fn=on_page_load,
-        outputs=[invest_dropdown, manual_invest_dropdown, items_inv_dropdown, hist_inv_dropdown, delete_inv_dropdown]
+        outputs=[
+            invest_dropdown, manual_invest_dropdown, items_inv_dropdown, hist_inv_dropdown, delete_inv_dropdown,
+            manual_start_pages, manual_progress, manual_total, manual_status
+        ]
     )
 
 # Background initial Garmin Sync
