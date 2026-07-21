@@ -479,9 +479,23 @@ def check_timer_settle_fields():
             cur_page = ""
             if item and item.get("total") and item.get("progress") is not None:
                 cur_page = str(int(round(item["progress"] * item["total"])))
-            return gr.update(visible=True, value=cur_page), gr.update(visible=True, value=cur_page), gr.update(visible=True, value="300"), status_update
+            return (
+                gr.update(visible=True, label="起始頁數 (本次開始讀的頁數)", placeholder="例如：150", value=cur_page),
+                gr.update(visible=True, label="讀到第幾頁 (結束時的頁數)", placeholder="例如：200", value=cur_page),
+                gr.update(visible=True, label="總頁數", placeholder="例如：300", value=str(int(item.get("total") or 300))),
+                status_update
+            )
         elif inv["progress_type"] == "percentage":
-            return gr.update(visible=True, value="0"), gr.update(visible=False), gr.update(visible=False), status_update
+            item = next((it for it in service.items if it["id"] == timer_state["item_id"]), None)
+            cur_percent = ""
+            if item and item.get("progress") is not None:
+                cur_percent = str(int(round(item["progress"] * 100)))
+            return (
+                gr.update(visible=False),
+                gr.update(visible=True, label="目前累計進度 (%)", placeholder="例如：80", value=cur_percent),
+                gr.update(visible=False),
+                status_update
+            )
         else:
             return gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), status_update
             
@@ -533,6 +547,15 @@ def settle_timer(start_pages_val, progress_val, total_val, remarks, settle_statu
                         pages_read_detail = f"讀至第 {int(cur)} 頁"
             elif inv["progress_type"] == "percentage":
                 progress_snapshot = min(float(progress_val) / 100.0, 1.0)
+                for it in service.items:
+                    if it["id"] == timer_state["item_id"]:
+                        it["progress"] = progress_snapshot
+                from timevest_service import save_json, ITEMS_FILE
+                save_json(ITEMS_FILE, service.items)
+                try:
+                    pages_read_detail = f"進度更新至 {int(float(progress_val))}%"
+                except Exception:
+                    pages_read_detail = f"進度更新至 {progress_val}%"
         except Exception:
             pass
 
