@@ -1649,6 +1649,28 @@ with gr.Blocks(theme=theme, css=custom_css, title="時光投資簿 timeVest") as
         outputs=[delete_inv_dropdown, items_inv_dropdown, manual_invest_dropdown]
     )
 
+    # Page load refresh: reload local JSON data and refresh all dropdowns
+    def on_page_load():
+        """Re-read JSON files to restore in-memory state after server restarts."""
+        from timevest_service import load_json, INVESTMENTS_FILE, ITEMS_FILE, MILESTONES_FILE
+        service.investments = load_json(INVESTMENTS_FILE, [])
+        service.items = load_json(ITEMS_FILE, [])
+        service.milestones = load_json(MILESTONES_FILE, [])
+        service.deduplicate_items()
+        choices = get_investment_choices()
+        return (
+            gr.update(choices=choices, value=service.investments[0]["name"] if service.investments else None),
+            gr.update(choices=choices, value=service.investments[0]["name"] if service.investments else None),
+            gr.update(choices=choices, value=service.investments[0]["name"] if service.investments else None),
+            gr.update(choices=choices, value=service.investments[0]["name"] if service.investments else None),
+            gr.update(choices=choices),
+        )
+
+    app.load(
+        fn=on_page_load,
+        outputs=[invest_dropdown, manual_invest_dropdown, items_inv_dropdown, hist_inv_dropdown, delete_inv_dropdown]
+    )
+
 # Background initial Garmin Sync
 def run_initial_sync():
     try:
@@ -1660,26 +1682,4 @@ def run_initial_sync():
 
 threading.Thread(target=run_initial_sync, daemon=True).start()
 
-# Page load refresh: reload local JSON data and refresh all dropdowns
-def on_page_load():
-    """Re-read JSON files to restore in-memory state after server restarts."""
-    from timevest_service import load_json, INVESTMENTS_FILE, ITEMS_FILE, MILESTONES_FILE
-    service.investments = load_json(INVESTMENTS_FILE, [])
-    service.items = load_json(ITEMS_FILE, [])
-    service.milestones = load_json(MILESTONES_FILE, [])
-    service.deduplicate_items()
-    choices = get_investment_choices()
-    return (
-        gr.update(choices=choices, value=service.investments[0]["name"] if service.investments else None),
-        gr.update(choices=choices, value=service.investments[0]["name"] if service.investments else None),
-        gr.update(choices=choices, value=service.investments[0]["name"] if service.investments else None),
-        gr.update(choices=choices, value=service.investments[0]["name"] if service.investments else None),
-        gr.update(choices=choices),
-    )
-
-app.load(
-    fn=on_page_load,
-    outputs=[invest_dropdown, manual_invest_dropdown, items_inv_dropdown, hist_inv_dropdown, delete_inv_dropdown]
-)
-
-app.launch(server_name="0.0.0.0")
+app.launch(server_name="0.0.0.0", server_port=7860)
