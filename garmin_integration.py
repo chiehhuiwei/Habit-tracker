@@ -245,7 +245,20 @@ def sync_garmin_activities(bq_client, table_id, days=3):
         if act_id in existing_ids:
             continue
             
-        habit_name = GARMIN_TYPE_MAP.get(act.activity_name, "健身")
+        # Map Garmin activity to local habit name using robust keyword matching
+        act_name_lower = act.activity_name.lower()
+        act_type_lower = act.activity_type.lower()
+        if "walk" in act_name_lower or "walk" in act_type_lower:
+            habit_name = "走路"
+        elif "run" in act_name_lower or "run" in act_type_lower:
+            if "treadmill" in act_name_lower or "treadmill" in act_type_lower:
+                habit_name = "跑步機"
+            else:
+                habit_name = "慢跑"
+        elif "strength" in act_name_lower or "strength" in act_type_lower:
+            habit_name = "健身"
+        else:
+            habit_name = GARMIN_TYPE_MAP.get(act.activity_name, "健身")
         
         # Garmin start_time_local is usually "YYYY-MM-DD HH:MM:SS"
         start_time_iso = act.start_time_local.replace(" ", "T")
