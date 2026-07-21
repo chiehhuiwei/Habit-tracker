@@ -937,6 +937,7 @@ with gr.Blocks(theme=theme, css=custom_css, title="時光投資簿 timeVest") as
                         with gr.Row():
                             item_dropdown = gr.Dropdown(
                                 choices=[it["name"] for it in _init_items] if _init_items else [],
+                                value=_init_items[0]["name"] if _init_items else None,
                                 label=f"選擇{_init_label}" if _init_has_label else "項目",
                                 visible=_init_has_label and bool(_init_items),
                                 interactive=True,
@@ -1009,7 +1010,12 @@ with gr.Blocks(theme=theme, css=custom_css, title="時光投資簿 timeVest") as
                                 init_visible = True
                                 init_label = default_inv["item_label"]
                                 
-                        manual_item_dropdown = gr.Dropdown(choices=init_choices, visible=init_visible, label=init_label)
+                        manual_item_dropdown = gr.Dropdown(
+                            choices=init_choices,
+                            value=init_choices[0] if init_choices else None,
+                            visible=init_visible,
+                            label=init_label
+                        )
                         
                         manual_start = gr.Textbox(label="開始時間 (YYYY-MM-DD HH:MM)", placeholder="例如: 2026-06-29 14:00")
                         manual_end = gr.Textbox(label="結束時間 (YYYY-MM-DD HH:MM)", placeholder="例如: 2026-06-29 15:30")
@@ -1820,6 +1826,14 @@ with gr.Blocks(theme=theme, css=custom_css, title="時光投資簿 timeVest") as
         default_items = service.get_items(inv_id=default_inv["id"]) if (default_inv and default_inv["item_label"]) else []
         default_item = default_items[0] if default_items else None
         
+        # Focus timer item dropdown & warning state
+        t_label = default_inv["item_label"] if (default_inv and default_inv["item_label"]) else "項目"
+        t_items_exist = bool(default_items)
+        t_has_label = bool(default_inv and default_inv["item_label"])
+        
+        timer_warn_vis = bool(t_has_label and not t_items_exist)
+        timer_warn_val = f"<div style='display:flex;align-items:center;gap:8px;padding:10px 14px;background:#FFF7ED;border:1px solid #FDBA74;border-radius:10px;font-size:13px;color:#92400E;'>⚠️ 目前無{t_label}，請先新增。</div>" if timer_warn_vis else ""
+        
         m_start_pages_vis = False
         m_progress_vis = False
         m_total_vis = False
@@ -1854,6 +1868,13 @@ with gr.Blocks(theme=theme, css=custom_css, title="時光投資簿 timeVest") as
             gr.update(choices=choices, value=service.investments[0]["name"] if service.investments else None),
             gr.update(choices=choices, value=service.investments[0]["name"] if service.investments else None),
             gr.update(choices=choices),
+            # Focus Timer item dropdowns, warning and buttons
+            gr.update(choices=[it["name"] for it in default_items], visible=bool(t_has_label and t_items_exist), label=f"選擇{t_label}" if t_has_label else "項目", value=default_item["name"] if default_item else None),
+            gr.update(choices=[it["name"] for it in default_items], visible=t_has_label, label=t_label, value=default_item["name"] if default_item else None),
+            gr.update(visible=timer_warn_vis, value=timer_warn_val),
+            gr.update(visible=timer_warn_vis),
+            gr.update(visible=bool(t_has_label and t_items_exist)),
+            # Manual progress updates
             gr.update(visible=m_start_pages_vis, value=m_start_pages_val),
             gr.update(visible=m_progress_vis, label=m_progress_label, value=m_progress_val),
             gr.update(visible=m_total_vis, value=m_total_val),
@@ -1864,6 +1885,7 @@ with gr.Blocks(theme=theme, css=custom_css, title="時光投資簿 timeVest") as
         fn=on_page_load,
         outputs=[
             invest_dropdown, manual_invest_dropdown, items_inv_dropdown, hist_inv_dropdown, delete_inv_dropdown,
+            item_dropdown, manual_item_dropdown, timer_item_warning, timer_quick_add_group, delete_item_quick_btn,
             manual_start_pages, manual_progress, manual_total, manual_status
         ]
     )
