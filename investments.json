@@ -13,7 +13,7 @@
         "name": "健身",
         "icon": "dumbbell.fill",
         "color": "#E2B659",
-        "item_label": null,
+        "item_label": "部位",
         "progress_type": "none",
         "total_duration": 0
     },

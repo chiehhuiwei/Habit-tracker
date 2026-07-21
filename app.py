@@ -1652,8 +1652,8 @@ with gr.Blocks(theme=theme, css=custom_css, title="時光投資簿 timeVest") as
     # Page load refresh: reload local JSON data and refresh all dropdowns
     def on_page_load():
         """Re-read JSON files to restore in-memory state after server restarts."""
-        from timevest_service import load_json, INVESTMENTS_FILE, ITEMS_FILE, MILESTONES_FILE
-        service.investments = load_json(INVESTMENTS_FILE, [])
+        from timevest_service import load_json, INVESTMENTS_FILE, ITEMS_FILE, MILESTONES_FILE, DEFAULT_INVESTMENTS
+        service.investments = load_json(INVESTMENTS_FILE, DEFAULT_INVESTMENTS)
         service.items = load_json(ITEMS_FILE, [])
         service.milestones = load_json(MILESTONES_FILE, [])
         service.deduplicate_items()

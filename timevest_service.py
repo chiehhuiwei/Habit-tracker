@@ -18,11 +18,29 @@ MILESTONES_FILE = os.path.join(DATA_DIR, "milestones.json")
 DEFAULT_INVESTMENTS = [
     {
         "id": "e2b65900-1111-2222-3333-444455556666",
-        "name": "日常閱讀",
+        "name": "閱讀",
         "icon": "book.fill",
         "color": "#E2B659",
         "item_label": "書籍",
         "progress_type": "pages",
+        "total_duration": 0
+    },
+    {
+        "id": "b8e23ed9-be48-43bd-b791-a9ba3c530539",
+        "name": "健身",
+        "icon": "dumbbell.fill",
+        "color": "#E2B659",
+        "item_label": "部位",
+        "progress_type": "none",
+        "total_duration": 0
+    },
+    {
+        "id": "c7a8b643-5a3a-4f5c-9b6d-76a8b643e534",
+        "name": "吉他",
+        "icon": "guitars.fill",
+        "color": "#E2B659",
+        "item_label": "曲目",
+        "progress_type": "percentage",
         "total_duration": 0
     }
 ]
@@ -34,6 +52,10 @@ def load_json(file_path, default_data):
             json.dump(default_data, f, ensure_ascii=False, indent=4)
         return default_data
     try:
+        if os.path.exists(file_path) and os.path.getsize(file_path) == 0:
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(default_data, f, ensure_ascii=False, indent=4)
+            return default_data
         with open(file_path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
