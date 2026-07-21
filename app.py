@@ -468,38 +468,51 @@ def pause_resume_timer():
 def check_timer_settle_fields():
     global timer_state
     if not timer_state["is_active"]:
-        return gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)
+        return gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)
         
     inv = next((i for i in service.investments if i["id"] == timer_state["inv_id"]), None)
-    if inv and timer_state["item_id"]:
+    if inv:
+        # Pause timer so the elapsed time stops ticking
+        timer_state["is_paused"] = True
+        
         status_update = gr.update(visible=True, value="inProgress")
-        if inv["progress_type"] == "pages":
-            # Look up current item progress to pre-fill start_pages
-            item = next((it for it in service.items if it["id"] == timer_state["item_id"]), None)
-            cur_page = ""
-            if item and item.get("total") and item.get("progress") is not None:
-                cur_page = str(int(round(item["progress"] * item["total"])))
-            return (
-                gr.update(visible=True, label="起始頁數 (本次開始讀的頁數)", placeholder="例如：150", value=cur_page),
-                gr.update(visible=True, label="讀到第幾頁 (結束時的頁數)", placeholder="例如：200", value=cur_page),
-                gr.update(visible=True, label="總頁數", placeholder="例如：300", value=str(int(item.get("total") or 300))),
-                status_update
-            )
-        elif inv["progress_type"] == "percentage":
-            item = next((it for it in service.items if it["id"] == timer_state["item_id"]), None)
-            cur_percent = ""
-            if item and item.get("progress") is not None:
-                cur_percent = str(int(round(item["progress"] * 100)))
-            return (
-                gr.update(visible=False),
-                gr.update(visible=True, label="目前累計進度 (%)", placeholder="例如：80", value=cur_percent),
-                gr.update(visible=False),
-                status_update
-            )
-        else:
-            return gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), status_update
+        if timer_state["item_id"]:
+            if inv["progress_type"] == "pages":
+                # Look up current item progress to pre-fill start_pages
+                item = next((it for it in service.items if it["id"] == timer_state["item_id"]), None)
+                cur_page = ""
+                if item and item.get("total") and item.get("progress") is not None:
+                    cur_page = str(int(round(item["progress"] * item["total"])))
+                return (
+                    gr.update(visible=True),
+                    gr.update(visible=True, label="起始頁數 (本次開始讀的頁數)", placeholder="例如：150", value=cur_page),
+                    gr.update(visible=True, label="讀到第幾頁 (結束時的頁數)", placeholder="例如：200", value=cur_page),
+                    gr.update(visible=True, label="總頁數", placeholder="例如：300", value=str(int(item.get("total") or 300))),
+                    status_update
+                )
+            elif inv["progress_type"] == "percentage":
+                item = next((it for it in service.items if it["id"] == timer_state["item_id"]), None)
+                cur_percent = ""
+                if item and item.get("progress") is not None:
+                    cur_percent = str(int(round(item["progress"] * 100)))
+                return (
+                    gr.update(visible=True),
+                    gr.update(visible=False),
+                    gr.update(visible=True, label="目前累計進度 (%)", placeholder="例如：80", value=cur_percent),
+                    gr.update(visible=False),
+                    status_update
+                )
+        
+        # If no item, or progress_type == "none"
+        return (
+            gr.update(visible=True),
+            gr.update(visible=False),
+            gr.update(visible=False),
+            gr.update(visible=False),
+            gr.update(visible=False)
+        )
             
-    return gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)
+    return gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)
 
 def settle_timer(start_pages_val, progress_val, total_val, remarks, settle_status="inProgress"):
     global timer_state
@@ -953,7 +966,7 @@ with gr.Blocks(theme=theme, css=custom_css, title="時光投資簿 timeVest") as
                         timer_msg = gr.Textbox(label="當前狀態", value="準備投資", interactive=False)
 
                         # Dynamic inputs during timer or settlement
-                        with gr.Group(visible=True) as settle_panel:
+                        with gr.Group(visible=False) as settle_panel:
                             gr.Markdown("#### 結算投入進度")
                             settle_start_pages = gr.Textbox(label="起始頁數 (本次開始讀的頁數)", visible=False, placeholder="例如：150")
                             settle_progress = gr.Textbox(label="讀到第幾頁 (結束時的頁數)", visible=False, placeholder="例如：200")
@@ -965,6 +978,7 @@ with gr.Blocks(theme=theme, css=custom_css, title="時光投資簿 timeVest") as
                                 label="結算後項目狀態",
                                 visible=_init_has_label
                             )
+                            confirm_settle_btn = gr.Button("確認結算進度", variant="primary")
 
                         with gr.Row():
                             start_btn = gr.Button("開始注入", variant="primary")
@@ -1312,23 +1326,25 @@ with gr.Blocks(theme=theme, css=custom_css, title="時光投資簿 timeVest") as
         msg = settle_timer(start_pages_val, progress_val, total_val, remarks_val, settle_status_val)
         banner = get_banner_html(db_start_val.strip(), db_end_val.strip())
         alloc = get_allocation_html(db_start_val.strip(), db_end_val.strip())
-        return msg, banner, alloc, gr.update(active=False), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), get_stopwatch_html("00:00"), "準備投資"
+        return msg, banner, alloc, gr.update(active=False), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), get_stopwatch_html("00:00"), "準備投資"
 
     settle_btn.click(
         fn=check_timer_settle_fields,
-        outputs=[settle_start_pages, settle_progress, settle_total, settle_status]
-    ).then(
+        outputs=[settle_panel, settle_start_pages, settle_progress, settle_total, settle_status]
+    )
+
+    confirm_settle_btn.click(
         fn=complete_settle_workflow,
         inputs=[settle_start_pages, settle_progress, settle_total, remarks, settle_status, dashboard_start_date, dashboard_end_date],
-        outputs=[timer_msg, banner_view, allocation_view, stopwatch_trigger, settle_start_pages, settle_progress, settle_total, settle_status, stopwatch_display, timer_msg]
+        outputs=[timer_msg, banner_view, allocation_view, stopwatch_trigger, settle_panel, settle_start_pages, settle_progress, settle_total, settle_status, stopwatch_display, timer_msg]
     )
 
     discard_btn.click(
         fn=discard_timer,
         outputs=[timer_msg]
     ).then(
-        fn=lambda: (gr.update(active=False), get_stopwatch_html("00:00"), "準備投資", gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)),
-        outputs=[stopwatch_trigger, stopwatch_display, timer_msg, settle_start_pages, settle_progress, settle_total, settle_status]
+        fn=lambda: (gr.update(active=False), get_stopwatch_html("00:00"), "準備投資", gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)),
+        outputs=[stopwatch_trigger, stopwatch_display, timer_msg, settle_panel, settle_start_pages, settle_progress, settle_total, settle_status]
     )
 
     # Refresh dashboard
