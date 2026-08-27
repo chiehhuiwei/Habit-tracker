@@ -1,0 +1,11 @@
+services:
+  habit-tracker:
+    build: .
+    image: habit-tracker:latest
+    restart: unless-stopped
+    ports:
+      - "7860:7860"
+    mem_limit: 512m
+    memswap_limit: 512m
+    env_file:
+      - .env
