@@ -1,6 +1,5 @@
 import gradio as gr
 import pandas as pd
-import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 import os
 import json
@@ -2026,4 +2025,5 @@ def run_initial_sync():
 
 threading.Thread(target=run_initial_sync, daemon=True).start()
 
+app.queue(default_concurrency_limit=5, max_size=20)
 app.launch(server_name="0.0.0.0", server_port=7860)
