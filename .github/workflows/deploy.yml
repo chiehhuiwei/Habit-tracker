@@ -69,6 +69,11 @@ jobs:
             touch /home/a0976395798/Habit-tracker/investments.json
             touch /home/a0976395798/Habit-tracker/items.json
             touch /home/a0976395798/Habit-tracker/milestones.json
+            # LINE runtime state + calendars.json, kept across deploys
+            mkdir -p /home/a0976395798/Habit-tracker/line_data
+
+            # Shared network so Caddy can reach the app as habit-tracker:7860
+            sudo docker network create timevest 2>/dev/null || true
 
             # Stop and remove existing container if it exists
             sudo docker stop habit-tracker || true
@@ -77,9 +82,11 @@ jobs:
             # Run new container
             sudo docker run -d \
               --name habit-tracker \
+              --network timevest \
               -p 7860:7860 \
               --restart always \
               --env-file /home/a0976395798/Habit-tracker/.env \
+              -v /home/a0976395798/Habit-tracker/line_data:/app/line_data \
               -e GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-key.json \
               -v /home/a0976395798/Habit-tracker/gcp-key.json:/app/gcp-key.json \
               -v /home/a0976395798/Habit-tracker/habits.json:/app/habits.json \
@@ -87,4 +94,25 @@ jobs:
               -v /home/a0976395798/Habit-tracker/items.json:/app/items.json \
               -v /home/a0976395798/Habit-tracker/milestones.json:/app/milestones.json \
               ghcr.io/$IMAGE_NAME:latest
+
+            # HTTPS for the LINE webhook (Caddy auto-issues the certificate); only when LINE_DOMAIN is set
+            LINE_DOMAIN=$(grep -E '^LINE_DOMAIN=' /home/a0976395798/Habit-tracker/.env | tail -1 | cut -d= -f2- | tr -d "\"' \r")
+            sudo docker stop caddy || true
+            sudo docker rm caddy || true
+            if [ -n "$LINE_DOMAIN" ]; then
+              cat > /home/a0976395798/Habit-tracker/Caddyfile <<'EOF'
+            {$LINE_DOMAIN} {
+            	reverse_proxy habit-tracker:7860
+            }
+            EOF
+              sudo docker run -d \
+                --name caddy \
+                --network timevest \
+                -p 80:80 -p 443:443 \
+                --restart always \
+                -e LINE_DOMAIN="$LINE_DOMAIN" \
+                -v /home/a0976395798/Habit-tracker/Caddyfile:/etc/caddy/Caddyfile:ro \
+                -v caddy_data:/data \
+                caddy:2
+            fi
 
