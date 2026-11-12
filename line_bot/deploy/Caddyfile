@@ -1,0 +1,5 @@
+# 自動申請 Let's Encrypt 憑證；網頁版與 LINE Webhook 都走 HTTPS
+# Webhook URL：https://{$LINE_DOMAIN}/line/webhook
+{$LINE_DOMAIN} {
+	reverse_proxy habit-tracker:7860
+}

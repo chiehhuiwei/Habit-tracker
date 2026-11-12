@@ -1,0 +1,16 @@
+[
+  {
+    "key": "learn",
+    "label": "上英文課",
+    "emoji": "📘",
+    "url": "https://calendar.google.com/calendar/ical/REPLACE/private-REPLACE/basic.ics",
+    "investment": "英文課"
+  },
+  {
+    "key": "teach",
+    "label": "教英文",
+    "emoji": "🧑‍🏫",
+    "url": "https://REPLACE_WITH_TEACHING_PLATFORM/calendar.ics",
+    "investment": "教英文"
+  }
+]

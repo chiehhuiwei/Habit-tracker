@@ -25,3 +25,8 @@ gcp-key.json
 
 # Test files (not needed at runtime)
 test_*.py
+tests/
+
+# LINE：執行期資料由 volume 掛載；圖文選單只在本機上傳用
+line_data/
+line_bot/richmenu/

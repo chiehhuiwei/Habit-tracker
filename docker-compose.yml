@@ -9,3 +9,26 @@ services:
     memswap_limit: 512m
     env_file:
       - .env
+    volumes:
+      # LINE 對話狀態與行事曆設定（calendars.json），重建 image 不會遺失
+      - ./line_data:/app/line_data
+
+  # LINE Webhook 需要 HTTPS：docker compose --profile https up -d
+  # 需在 .env 設定 LINE_DOMAIN，且該網域 DNS 指向這台 VM、防火牆開 80/443
+  caddy:
+    image: caddy:2
+    profiles: ["https"]
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file:
+      - .env
+    volumes:
+      - ./line_bot/deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      - habit-tracker
+
+volumes:
+  caddy_data:

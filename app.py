@@ -12,6 +12,7 @@ from google.cloud import bigquery
 from google.api_core.exceptions import NotFound
 from google.oauth2 import service_account
 
+import line_bot
 from garmin_integration import sync_garmin_activities
 from timevest_service import TimeVestService
 
@@ -2026,4 +2027,9 @@ def run_initial_sync():
 threading.Thread(target=run_initial_sync, daemon=True).start()
 
 app.queue(default_concurrency_limit=5, max_size=20)
-app.launch(server_name="0.0.0.0", server_port=7860)
+
+# 有設定 LINE_CHANNEL_* 時，LINE webhook（/line/webhook）與 Gradio 共用同一個 server 與 service
+if line_bot.is_enabled():
+    line_bot.serve_with_gradio(app, service, host="0.0.0.0", port=7860)
+else:
+    app.launch(server_name="0.0.0.0", server_port=7860)

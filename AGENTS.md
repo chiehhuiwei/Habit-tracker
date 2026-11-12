@@ -50,6 +50,15 @@ Habit-tracker/
 ├── app.py                  # Main entry point: all Gradio UI, event handlers, and HTML rendering
 ├── timevest_service.py     # Business logic layer: CRUD for investments, items, activities, milestones
 ├── garmin_integration.py   # Garmin Connect sync: pulls sleep/activity data into BigQuery
+├── line_bot/               # LINE OA webhook + calendar reminders (see line_bot/README.md)
+│   ├── flows/              #   Conversation steps: start / end / pending draft / router
+│   ├── calendar/           #   iCal fetch + recurrence expansion + merge/conflict detection
+│   ├── views/              #   Schedule (Flex) and stats replies
+│   ├── jobs/               #   Reminder + daily digest scheduler
+│   ├── ledger.py           #   The ONLY place line_bot touches TimeVestService
+│   └── richmenu/           #   Rich menu image + upload script (local use only)
+├── line_data/              # LINE runtime state + calendars.json (NOT committed; Docker volume)
+├── tests/                  # pytest suite for line_bot (fake BigQuery client)
 ├── investments.json        # Local persistent store: list of investment accounts
 ├── items.json              # Local persistent store: list of tracked items (books, courses, etc.)
 ├── habits.json             # Local persistent store: habit records (legacy)
@@ -66,12 +75,12 @@ Habit-tracker/
 ### Data Flow
 
 ```
-User (Browser)
-    │
-    ▼
-Gradio (app.py)          ← Event handlers, HTML builders
-    │
-    ▼
+User (Browser)            LINE App
+    │                        │  POST /line/webhook (signed)
+    ▼                        ▼
+Gradio (app.py)          line_bot (same process, mounted on the same FastAPI app)
+    │                        │
+    ▼                        ▼
 TimeVestService           ← Business logic, JSON CRUD, milestone triggers
     │
     ├── investments.json / items.json / milestones.json  (local state)
@@ -83,6 +92,13 @@ TimeVestService           ← Business logic, JSON CRUD, milestone triggers
 - **Local JSON files** hold the "master list" of accounts, items, and milestones in memory (`service.investments`, `service.items`, `service.milestones`).
 - **BigQuery** is the time-series log for every focus session (`log_activity`, `get_activities_by_range`).
 - On server (re)start, `on_page_load()` reloads JSON files from disk into `service.*` to restore in-memory state.
+
+### LINE Bot (`line_bot/`)
+- Enabled only when `LINE_CHANNEL_SECRET` and `LINE_CHANNEL_ACCESS_TOKEN` are set; then `app.py` serves Gradio via `line_bot.serve_with_gradio()` (FastAPI + `gr.mount_gradio_app`) instead of `app.launch()`. Without them the app behaves exactly as before.
+- It shares the singleton `service`, so LINE writes are visible to the web UI immediately. Never read/write the JSON files or BigQuery directly from `line_bot/` — go through `ledger.py`.
+- BigQuery streaming inserts cannot be UPDATEd right away, so a LINE session is kept as a pending draft until progress/memo are collected, then written with a single `log_activity()` call (auto-committed after `PENDING_COMMIT_MIN`).
+- LINE events and scheduled reminders run on one background worker thread (`line_bot/worker.py`) to serialise state changes.
+- Item quick-replies follow the same rule as the Focus Timer: show **all** items for the account, not only `inProgress`.
 
 ---
 
@@ -124,12 +140,23 @@ All secrets must be loaded from `.env` via `python-dotenv`. Required keys:
 | `GARMIN_EMAIL` | Garmin account email |
 | `GARMIN_PASSWORD` | Garmin account password |
 | `GARMIN_TOKEN_STORE` | Local path for Garmin OAuth token cache |
+| `LINE_CHANNEL_SECRET` | LINE Messaging API channel secret (optional; enables LINE bot) |
+| `LINE_CHANNEL_ACCESS_TOKEN` | LINE long-lived channel access token (optional; enables LINE bot) |
+| `LINE_OWNER_USER_ID` | Optional; otherwise the first user who messages the OA is bound as owner |
+| `LINE_DATA_DIR` | Optional; defaults to `./line_data` |
+| `LINE_DOMAIN` | Domain for the Caddy HTTPS proxy (`docker compose --profile https`) |
 
 ---
 
 ## 5. Testing Protocols
 
-This project currently has no automated test suite. The following **manual verification checklist** should be performed after every non-trivial change:
+The LINE bot has an automated suite (fake BigQuery client; never touches real data or the repo JSON files):
+```bash
+uv pip install pytest httpx
+python -m pytest tests
+```
+
+The Gradio UI has no automated tests. The following **manual verification checklist** should be performed after every non-trivial change:
 
 ### Focus Timer & Item Dropdown
 - [ ] Select each investment account — verify the item dropdown shows **all** items for that account (not just in-progress ones).
@@ -152,6 +179,11 @@ This project currently has no automated test suite. The following **manual verif
 ### Account Management
 - [ ] Add a new investment account → verify it appears in all account dropdowns across every tab.
 - [ ] Delete an account → verify all associated items are removed and dropdowns update.
+
+### LINE Bot (when enabled)
+- [ ] `curl https://<LINE_DOMAIN>/line/healthz` returns `{"ok":true}`; LINE Developers → Webhook **Verify** succeeds.
+- [ ] 開始記錄 → 結束記錄 → verify one new BigQuery row and that the web UI's account/item list reflects it.
+- [ ] `python -m line_bot.check_calendars` lists events from both calendars.
 
 ### Deployment Smoke Test
 After rebuilding the Docker image and deploying:
