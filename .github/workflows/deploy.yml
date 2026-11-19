@@ -71,18 +71,15 @@ jobs:
             TARGET_DIR="$HOME/Habit-tracker"
             mkdir -p "$TARGET_DIR/line_data"
 
-            # Shared network so Caddy can reach the app as habit-tracker:7860
-            sudo docker network create timevest 2>/dev/null || true
-
             # Stop and remove existing container if it exists
             sudo docker stop habit-tracker || true
             sudo docker rm habit-tracker || true
 
-            # Run new container
+            # Run new container (輕量化限制記憶體 384M，避開過度佔用資源)
             sudo docker run -d \
               --name habit-tracker \
-              --network timevest \
-              -p 7860:7860 \
+              -p 127.0.0.1:7860:7860 \
+              --mem-limit 384m \
               --restart always \
               --env-file "$TARGET_DIR/.env" \
               -v "$TARGET_DIR/line_data:/app/line_data" \
@@ -90,23 +87,7 @@ jobs:
               -v "$TARGET_DIR/gcp-key.json:/app/gcp-key.json" \
               ghcr.io/$IMAGE_NAME:latest
 
-            # HTTPS for the LINE webhook (Caddy auto-issues the certificate); only when LINE_DOMAIN is set
-            LINE_DOMAIN=$(grep -E '^LINE_DOMAIN=' "$TARGET_DIR/.env" | tail -1 | cut -d= -f2- | tr -d "\"' \r")
-            sudo docker stop caddy || true
-            sudo docker rm caddy || true
-            if [ -n "$LINE_DOMAIN" ]; then
-              cat > "$TARGET_DIR/Caddyfile" <<'EOF'
-            {$LINE_DOMAIN} {
-            	reverse_proxy habit-tracker:7860
-            }
-            EOF
-              sudo docker run -d \
-                --name caddy \
-                --network timevest \
-                -p 80:80 -p 443:443 \
-                --restart always \
-                -e LINE_DOMAIN="$LINE_DOMAIN" \
-                -v "$TARGET_DIR/Caddyfile:/etc/caddy/Caddyfile:ro" \
-                -v caddy_data:/data \
-                caddy:2
-            fi
+            # 若先前有遺留的 caddy 容器，一併停止以釋放資源
+            sudo docker stop caddy 2>/dev/null || true
+            sudo docker rm caddy 2>/dev/null || true
+            echo "✅ habit-tracker 部署完成，監聽 127.0.0.1:7860"
