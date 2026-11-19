@@ -1,16 +1,13 @@
 # ── Stage 1: dependency builder ─────────────────────────────────────────────
 FROM python:3.10-slim AS builder
 
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
+
 WORKDIR /app
 
-# 安裝 curl 並透過官方獨立二進位安裝 uv（避免 ghcr.io 登入認證限制）
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \
-    curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    rm -rf /var/lib/apt/lists/*
-
-ENV PATH="/root/.local/bin:$PATH" \
-    UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy
+# 直接從 PyPI 安裝 uv 二進位套件（不經 ghcr.io，不需 apt-get）
+RUN pip install --no-cache-dir uv
 
 # Install Python dependencies using a build-time cache mount
 RUN --mount=type=cache,target=/root/.cache/uv \

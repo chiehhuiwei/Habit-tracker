@@ -6,35 +6,104 @@ on:
       - main
   workflow_dispatch:
 
+env:
+  REGISTRY: ghcr.io
+
+permissions:
+  contents: read
+  packages: write
+
 jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}
+          tags: |
+            type=raw,value=latest
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   deploy:
+    needs: build-and-push
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to VM via SSH
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
+          envs: GITHUB_TOKEN,GITHUB_ACTOR
           script: |
             set -e
             TARGET_DIR="$HOME/Habit-tracker"
+            mkdir -p "$TARGET_DIR/line_data"
 
-            # 確保目錄存在並進入
-            cd "$TARGET_DIR"
+            # 若 VM 根目錄有舊版 JSON 資料，先複製進 line_data 供首次啟動匯入 SQLite
+            for f in investments.json items.json milestones.json; do
+              if [ -s "$TARGET_DIR/$f" ] && [ ! -f "$TARGET_DIR/line_data/$f" ]; then
+                cp "$TARGET_DIR/$f" "$TARGET_DIR/line_data/$f"
+              fi
+            done
 
-            # 確保代碼為最新版
-            git pull origin main
+            # 登入 GHCR（補齊 env 變數後 GITHUB_TOKEN 不再為空）
+            echo "$GITHUB_TOKEN" | sudo docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
-            # 確保資料夾存在
-            mkdir -p line_data
+            IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+            sudo docker pull "ghcr.io/$IMAGE_NAME:latest"
 
-            # 停止舊容器
+            # 停止並移除舊容器（含舊的 caddy）
             sudo docker stop habit-tracker 2>/dev/null || true
             sudo docker rm habit-tracker 2>/dev/null || true
+            sudo docker stop caddy 2>/dev/null || true
+            sudo docker rm caddy 2>/dev/null || true
 
-            # 直接使用 docker compose 本地建置並啟動 habit-tracker 服務
-            sudo docker compose up -d --build habit-tracker
+            # 啟動新容器（使用正確的 --memory=384m 參數，監聽 127.0.0.1:7860）
+            sudo docker run -d \
+              --name habit-tracker \
+              -p 127.0.0.1:7860:7860 \
+              --memory=384m \
+              --restart always \
+              --env-file "$TARGET_DIR/.env" \
+              -v "$TARGET_DIR/line_data:/app/line_data" \
+              -e GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-key.json \
+              -v "$TARGET_DIR/gcp-key.json:/app/gcp-key.json:ro" \
+              "ghcr.io/$IMAGE_NAME:latest"
 
-            echo "✅ habit-tracker 成功啟動！"
-            sudo docker ps | grep habit-tracker
+            # 等待 3 秒並驗證容器真的在 running，若退出則印出 log 並讓 CI 失敗
+            sleep 3
+            if ! sudo docker ps --filter "name=^/habit-tracker$" --filter "status=running" | grep -q habit-tracker; then
+              echo "❌ habit-tracker 容器啟動後退出，錯誤日誌如下："
+              sudo docker logs habit-tracker
+              exit 1
+            fi
+            echo "✅ habit-tracker 已啟動並正常運行："
+            sudo docker ps --filter "name=^/habit-tracker$"

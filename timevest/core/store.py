@@ -135,7 +135,7 @@ def import_legacy(user_id: str, root: str, data_dir: str) -> bool:
 
     found = False
     for table in _LISTS:
-        rows = read(os.path.join(root, f"{table}.json"))
+        rows = read(os.path.join(data_dir, f"{table}.json")) or read(os.path.join(root, f"{table}.json"))
         if rows and load_list(table, user_id) is None:
             save_list(table, user_id, rows)
             found = True

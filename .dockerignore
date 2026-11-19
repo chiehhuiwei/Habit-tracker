@@ -30,8 +30,7 @@ tests/
 # Runtime storage (mounted via volume)
 line_data/
 
-# Build scripts, docs, legacy backups
+# Build scripts, docs
 scripts/
 docs/
-legacy/
 examples/

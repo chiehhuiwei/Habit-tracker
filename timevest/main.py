@@ -24,7 +24,13 @@ PROJECT_ID = _env("BQ_PROJECT_ID")
 DATASET_ID = _env("BQ_DATASET_ID")
 TABLE_ID = f"{PROJECT_ID}.{DATASET_ID}.habit_logs"
 
-credentials = service_account.Credentials.from_service_account_file(_env("GOOGLE_APPLICATION_CREDENTIALS"))
+_cred_path = _env("GOOGLE_APPLICATION_CREDENTIALS")
+if not os.path.exists(_cred_path):
+    for _fallback in ("/app/gcp-key.json", "gcp-key.json"):
+        if os.path.exists(_fallback):
+            _cred_path = _fallback
+            break
+credentials = service_account.Credentials.from_service_account_file(_cred_path)
 client = bigquery.Client(project=PROJECT_ID, credentials=credentials)
 
 
