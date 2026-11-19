@@ -1,4 +1,4 @@
-from .. import ledger, state
+from .. import config, ledger, state, users
 from ..api import reply
 from ..messages import help_message, parse_postback, text_msg
 from ..views.schedule import reply_today_schedule, reply_week_schedule
@@ -12,6 +12,7 @@ from .start import (
     on_item_chosen,
     on_item_text,
     on_item_total_text,
+    on_quick_start,
     skip_start_step,
     start_from_event,
 )
@@ -29,6 +30,8 @@ ACTIONS = {
     "week": lambda ev, p: reply_week_schedule(ev["replyToken"]),
     "stats": lambda ev, p: reply_today_stats(ev["replyToken"]),
     "accounts": lambda ev, p: reply_accounts(ev["replyToken"]),
+    "remind_cfg": lambda ev, p: _reply_cal_help(ev["replyToken"]),
+    "bind_cal": lambda ev, p: _reply_cal_help(ev["replyToken"]),
     "help": lambda ev, p: reply(ev["replyToken"], help_message()),
     "cancel": _cancel,
     "inv": lambda ev, p: on_activity_chosen(ev["replyToken"], ledger.get_investment(p.get("id"))),
@@ -63,8 +66,14 @@ SKIP_HANDLERS = {
 
 
 def handle_event(ev: dict) -> None:
-    if not _is_owner(ev):
+    user_id = _authorize(ev)
+    if not user_id:
         return
+    with users.use(user_id):
+        _dispatch(ev)
+
+
+def _dispatch(ev: dict) -> None:
     if ev["type"] == "message" and ev["message"]["type"] == "text":
         return _handle_text(ev)
     if ev["type"] == "postback":
@@ -74,8 +83,42 @@ def handle_event(ev: dict) -> None:
         reply(ev["replyToken"], [text_msg("歡迎使用 timeVest 時光投資簿 📈"), help_message()])
 
 
+def _reply_cal_help(token):
+    from ..api import reply
+    from ..messages import text_msg, QR
+    msg = """📅 綁定個人手機行事曆（iPhone / Google 日曆）
+
+1. 打開 iPhone「行事曆」App ➔ 點下方「行事曆」
+2. 在想同步的日曆旁點 ℹ️ ➔ 開啟「公開行事曆」
+3. 點「共享連結」複製網址（webcal://...）
+4. 直接傳送該網址給我即可綁定！
+
+也可以開啟 LIFF「行程管理」頁面進行設定 ✨"""
+    reply(token, text_msg(msg, [QR.start()]))
+
 def _handle_text(ev: dict) -> None:
     text = ev["message"]["text"].strip()
+    # 偵測是否傳送了行事曆 URL (webcal:// 或包含 .ics 或 p*-caldav.icloud.com)
+    if text.startswith("webcal://") or ".ics" in text or "icloud.com/published" in text:
+        from ..calendar.sources import load_calendar_sources, save_calendar_sources
+        clean_url = text.strip()
+        if clean_url.startswith("webcal://"):
+            clean_url = "https://" + clean_url[9:]
+        sources = load_calendar_sources()
+        import uuid
+        sources.append({
+            "key": f"cal_{uuid.uuid4().hex[:8]}",
+            "label": "iPhone個人行事曆",
+            "emoji": "📱",
+            "url": clean_url,
+            "investment": "個人成長"
+        })
+        save_calendar_sources(users.current(), sources)
+        from ..api import reply
+        from ..messages import text_msg, QR
+        msg = "✅ 成功綁定 iPhone 行事曆！\n未來每天早上 08:00 與課前 15 分鐘將為你推播提醒 🔔"
+        return reply(ev["replyToken"], text_msg(msg, [QR.start()]))
+
     command = TEXT_COMMANDS.get(text)
     if command:
         return _run_action(command, ev, {})
@@ -83,6 +126,9 @@ def _handle_text(ev: dict) -> None:
     handler = conv and STEP_HANDLERS.get(conv["step"])
     if handler:
         return handler(ev["replyToken"], text, conv)
+    if text.startswith("開始 ") and text[3:].strip():
+        commit_pending()
+        return on_quick_start(ev["replyToken"], text[3:].strip())
     reply(ev["replyToken"], help_message())
 
 
@@ -104,18 +150,25 @@ def _on_skip(token: str) -> None:
     reply(token, text_msg("目前沒有需要略過的步驟"))
 
 
-def _is_owner(ev: dict) -> bool:
-    """未設定 LINE_OWNER_USER_ID 時，第一個傳訊息的人會被綁定為擁有者。"""
+def _authorize(ev: dict):
+    """回傳可使用的 userId；非成員可用邀請碼（LINE_INVITE_CODE）加入。第一位使用者在未設定擁有者時成為擁有者。"""
     user_id = (ev.get("source") or {}).get("userId")
     if not user_id:
-        return False
-    owner = state.get_owner_id()
-    if not owner:
-        state.set_owner_id(user_id)
+        return None
+    if not users.owner_id():
+        users.set_owner_id(user_id)
         print(f"[LINE] 已綁定擁有者 {user_id}")
-        return True
-    if owner == user_id:
-        return True
-    if ev.get("replyToken"):
-        reply(ev["replyToken"], text_msg("這是私人使用的帳號 🙏"))
-    return False
+        return user_id
+    if users.is_member(user_id):
+        return user_id
+    token = ev.get("replyToken")
+    if not token:
+        return None
+    text = ev["message"]["text"].strip() if ev["type"] == "message" and ev["message"]["type"] == "text" else ""
+    if config.INVITE_CODE and text == config.INVITE_CODE:
+        users.add_member(user_id)
+        with users.use(user_id):
+            reply(token, [text_msg("歡迎加入 timeVest 時光投資簿 📈"), help_message()])
+        return None
+    reply(token, text_msg("請輸入邀請碼才能使用 🔑" if config.INVITE_CODE else "這是私人使用的帳號 🙏"))
+    return None

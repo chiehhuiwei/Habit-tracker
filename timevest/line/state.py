@@ -1,42 +1,29 @@
-"""LINE 對話執行期狀態（line_data/state.json）：對話步驟、計時中 session、待寫入草稿、已送提醒、擁有者。"""
-import json
+"""LINE 對話執行期狀態（SQLite kv，每位使用者各自一份）：對話步驟、計時中 session、待寫入草稿、已送提醒、擁有者。"""
 import os
-import threading
 import time
 
-from . import config, settings
+from timevest.core import store
 
-_lock = threading.Lock()
-_FILE = os.path.join(config.DATA_DIR, "state.json")
+from . import config, settings, users
 
 
 def ensure_data_dir() -> None:
     os.makedirs(config.DATA_DIR, exist_ok=True)
 
 
-def _load() -> dict:
-    if not os.path.exists(_FILE):
-        return {}
-    with open(_FILE, encoding="utf-8") as f:
-        return json.load(f)
+def _uid() -> str:
+    uid = users.current()
+    if not uid:
+        raise RuntimeError("沒有目前使用者")
+    return uid
 
 
 def _get(key: str):
-    with _lock:
-        return _load().get(key)
+    return store.kv_get(_uid(), key)
 
 
 def _set(key: str, value) -> None:
-    with _lock:
-        data = _load()
-        if value is None:
-            data.pop(key, None)
-        else:
-            data[key] = value
-        tmp = f"{_FILE}.tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, _FILE)
+    store.kv_set(_uid(), key, value)
 
 
 def get_conv():
@@ -85,8 +72,8 @@ def set_last_digest_day(day: str) -> None:
 
 
 def get_owner_id():
-    return config.OWNER_USER_ID or _get("owner")
+    return users.owner_id()
 
 
 def set_owner_id(user_id: str) -> None:
-    _set("owner", user_id)
+    users.set_owner_id(user_id)

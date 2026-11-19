@@ -1,10 +1,19 @@
-"""python -m line_bot.check_calendars：列出未來 7 天合併後的行程，確認行事曆讀得到。"""
+"""python -m timevest.line.check_calendars [userId]：列出未來 7 天合併後的行程（預設擁有者），確認行事曆讀得到。"""
+import sys
+
+from . import users
 from .calendar.events import conflict_uids, fetch_events
 from .calendar.sources import load_calendar_sources
 from .timefmt import add_days, day_start, fmt_day, fmt_time, now
 
 
 def main() -> None:
+    uid = sys.argv[1] if len(sys.argv) > 1 else users.owner_id()
+    with users.use(uid):
+        _run()
+
+
+def _run() -> None:
     start = day_start(now())
     events = fetch_events(start, add_days(start, 7))
     conflicts = conflict_uids(events)

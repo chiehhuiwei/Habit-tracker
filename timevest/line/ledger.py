@@ -1,19 +1,14 @@
 """LINE 與 TimeVestService 之間的轉接層：所有帳戶／項目／BigQuery 寫入都經過既有的 service。"""
-from . import settings
+from . import settings, users
 from .timefmt import add_days, day_start, now, parse_iso, seconds_between
 
-_service = None
-
-
 def bind_service(service) -> None:
-    global _service
-    _service = service
+    """單人／測試模式：所有人共用同一個 service。多人請用 users.bind_factory。"""
+    users.bind_single(service)
 
 
 def svc():
-    if _service is None:
-        raise RuntimeError("line_bot 尚未綁定 TimeVestService")
-    return _service
+    return users.service_for(users.current())
 
 
 # --- Investments ---

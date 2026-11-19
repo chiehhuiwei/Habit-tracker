@@ -12,15 +12,25 @@ def begin_start(token: str) -> None:
         return reply(token, running_notice(running))
 
     state.set_conv({"step": "pick_activity"})
+    # 常用活動（⭐）排最前面
+    ordered = sorted(ledger.list_investments(), key=lambda inv: not inv.get("favorite"))
     choices = [
-        qr_postback(inv["name"], postback_data(a="inv", id=inv["id"]))
-        for inv in ledger.list_investments()[: MAX_QUICK_REPLIES - 1]
+        qr_postback(("⭐ " if inv.get("favorite") else "") + inv["name"], postback_data(a="inv", id=inv["id"]))
+        for inv in ordered[: MAX_QUICK_REPLIES - 1]
     ]
     reply(token, text_msg("要記錄什麼活動？\n點選下方按鈕，或直接輸入新的活動名稱 ✍️", choices + [QR.cancel()]))
 
 
 def on_activity_text(token: str, text: str, _state=None) -> None:
     on_activity_chosen(token, ledger.find_or_create_investment(text))
+
+
+def on_quick_start(token: str, name: str) -> None:
+    """文字「開始 閱讀」：直接選活動（沒有就建立），省去點選單。"""
+    running = state.get_session()
+    if running:
+        return reply(token, running_notice(running))
+    on_activity_chosen(token, ledger.find_or_create_investment(name))
 
 
 def on_activity_chosen(token: str, inv) -> None:

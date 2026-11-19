@@ -4,7 +4,7 @@ import hmac
 
 import requests
 
-from . import config, state
+from . import config, users
 
 API = "https://api.line.me/v2/bot/"
 
@@ -33,11 +33,11 @@ def reply(reply_token: str, messages) -> None:
 
 
 def push(messages) -> None:
-    owner = state.get_owner_id()
-    if not owner:
-        print("[LINE] 尚未綁定擁有者，略過推播")
+    target = users.current()
+    if not target:
+        print("[LINE] 尚未綁定使用者，略過推播")
         return
-    _call("message/push", {"to": owner, "messages": _as_list(messages)})
+    _call("message/push", {"to": target, "messages": _as_list(messages)})
 
 
 def verify_signature(body: bytes, signature) -> bool:
