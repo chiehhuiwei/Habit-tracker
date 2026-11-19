@@ -10,7 +10,7 @@ services:
     env_file:
       - .env
     volumes:
-      # LINE 對話狀態與行事曆設定（calendars.json），重建 image 不會遺失
+      # SQLite 資料庫（line_data/timevest.db），重建 image 不會遺失
       - ./line_data:/app/line_data
 
   # LINE Webhook 需要 HTTPS：docker compose --profile https up -d
@@ -25,7 +25,7 @@ services:
     env_file:
       - .env
     volumes:
-      - ./line_bot/deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
     depends_on:
       - habit-tracker

@@ -27,6 +27,11 @@ gcp-key.json
 test_*.py
 tests/
 
-# LINE：執行期資料由 volume 掛載；圖文選單只在本機上傳用
+# Runtime storage (mounted via volume)
 line_data/
-line_bot/richmenu/
+
+# Build scripts, docs, legacy backups
+scripts/
+docs/
+legacy/
+examples/

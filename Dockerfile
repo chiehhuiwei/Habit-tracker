@@ -25,12 +25,6 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/app/.venv/bin:$PATH"
 
-# Install system dependencies (fonts for matplotlib Chinese characters)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    fonts-wqy-zenhei \
-    fonts-wqy-microhei \
-    && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 
 # Bring in the pre-built virtual environment from the builder stage
@@ -39,8 +33,7 @@ COPY --from=builder /app/.venv /app/.venv
 # Copy the rest of the application
 COPY . .
 
-# Expose port 7860 for Gradio
+# FastAPI (LINE webhook + LIFF + REST API) on 7860; HTTPS is terminated by Caddy
 EXPOSE 7860
 
-# Run the app via the venv Python
-CMD ["python", "app.py"]
+CMD ["python", "-m", "timevest.main"]
