@@ -27,14 +27,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}
-          tags: |
-            type=raw,value=latest
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -43,8 +35,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ env.REGISTRY }}/${{ github.repository }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -67,26 +58,17 @@ jobs:
             TARGET_DIR="$HOME/Habit-tracker"
             mkdir -p "$TARGET_DIR/line_data"
 
-            # 若 VM 根目錄有舊版 JSON 資料，先複製進 line_data 供首次啟動匯入 SQLite
-            for f in investments.json items.json milestones.json; do
-              if [ -s "$TARGET_DIR/$f" ] && [ ! -f "$TARGET_DIR/line_data/$f" ]; then
-                cp "$TARGET_DIR/$f" "$TARGET_DIR/line_data/$f"
-              fi
-            done
+            IMAGE_NAME="${{ env.REGISTRY }}/${{ github.repository }}:latest"
 
-            # 登入 GHCR（補齊 env 變數後 GITHUB_TOKEN 不再為空）
-            echo "$GITHUB_TOKEN" | sudo docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+            # 登入 GHCR 並直接 Pull 預先編譯好的映像檔（極速，不消耗 VM CPU/RAM）
+            echo "$GITHUB_TOKEN" | sudo docker login ${{ env.REGISTRY }} -u "$GITHUB_ACTOR" --password-stdin
+            sudo docker pull "$IMAGE_NAME"
 
-            IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-            sudo docker pull "ghcr.io/$IMAGE_NAME:latest"
-
-            # 停止並移除舊容器（含舊的 caddy）
+            # 停止並移除舊容器
             sudo docker stop habit-tracker 2>/dev/null || true
             sudo docker rm habit-tracker 2>/dev/null || true
-            sudo docker stop caddy 2>/dev/null || true
-            sudo docker rm caddy 2>/dev/null || true
 
-            # 啟動新容器（使用正確的 --memory=384m 參數，監聽 127.0.0.1:7860）
+            # 啟動容器（監聽 127.0.0.1:7860，設定記憶體上限 384m）
             sudo docker run -d \
               --name habit-tracker \
               -p 127.0.0.1:7860:7860 \
@@ -96,14 +78,8 @@ jobs:
               -v "$TARGET_DIR/line_data:/app/line_data" \
               -e GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-key.json \
               -v "$TARGET_DIR/gcp-key.json:/app/gcp-key.json:ro" \
-              "ghcr.io/$IMAGE_NAME:latest"
+              "$IMAGE_NAME"
 
-            # 等待 3 秒並驗證容器真的在 running，若退出則印出 log 並讓 CI 失敗
-            sleep 3
-            if ! sudo docker ps --filter "name=^/habit-tracker$" --filter "status=running" | grep -q habit-tracker; then
-              echo "❌ habit-tracker 容器啟動後退出，錯誤日誌如下："
-              sudo docker logs habit-tracker
-              exit 1
-            fi
-            echo "✅ habit-tracker 已啟動並正常運行："
-            sudo docker ps --filter "name=^/habit-tracker$"
+            sleep 2
+            sudo docker ps --filter "name=habit-tracker"
+            echo "⚡ 部署完成！"

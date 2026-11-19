@@ -1,36 +1,23 @@
-# ── Stage 1: dependency builder ─────────────────────────────────────────────
-FROM python:3.10-slim AS builder
-
-ENV UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy
-
-WORKDIR /app
-
-# 直接從 PyPI 安裝 uv 二進位套件（不經 ghcr.io，不需 apt-get）
-RUN pip install --no-cache-dir uv
-
-# Install Python dependencies using a build-time cache mount
-RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,source=requirements.txt,target=requirements.txt \
-    uv venv /app/.venv && \
-    uv pip install --python /app/.venv/bin/python -r requirements.txt
-
-# ── Stage 2: lean runtime image ─────────────────────────────────────────────
 FROM python:3.10-slim
+
+# 從官方鏡像快速複製 uv（GitHub Actions 上秒抓）
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PATH="/app/.venv/bin:$PATH"
+    UV_SYSTEM_PYTHON=1
 
 WORKDIR /app
 
-# Bring in the pre-built virtual environment from the builder stage
-COPY --from=builder /app/.venv /app/.venv
+# 先複製 requirements.txt 利用 Docker 快取層
+COPY requirements.txt .
 
-# Copy the rest of the application
+# 直接用 uv 快速將套件裝入 system python（比 pip 快 10~50 倍，免除 venv 搬移耗時）
+RUN uv pip install -r requirements.txt
+
+# 複製應用程式代碼
 COPY . .
 
-# FastAPI on 7860
 EXPOSE 7860
 
 CMD ["python", "-m", "timevest.main"]
