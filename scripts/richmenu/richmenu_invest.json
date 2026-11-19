@@ -5,28 +5,36 @@
   "chatBarText": "⏱ 時光投資",
   "areas": [
     {
-      "bounds": { "x": 0, "y": 0, "width": 833, "height": 843 },
+      "bounds": { "x": 0, "y": 0, "width": 1250, "height": 266 },
+      "action": { "type": "postback", "data": "a=tab_invest", "displayText": "⏱ 時光投資" }
+    },
+    {
+      "bounds": { "x": 1250, "y": 0, "width": 1250, "height": 266 },
+      "action": { "type": "postback", "data": "a=tab_schedule", "displayText": "切換至 📅 行程管理" }
+    },
+    {
+      "bounds": { "x": 0, "y": 266, "width": 833, "height": 710 },
       "action": { "type": "postback", "data": "a=start", "displayText": "開始記錄" }
     },
     {
-      "bounds": { "x": 833, "y": 0, "width": 834, "height": 843 },
+      "bounds": { "x": 833, "y": 266, "width": 834, "height": 710 },
       "action": { "type": "postback", "data": "a=end", "displayText": "結束記錄" }
     },
     {
-      "bounds": { "x": 1667, "y": 0, "width": 833, "height": 843 },
+      "bounds": { "x": 1667, "y": 266, "width": 833, "height": 710 },
       "action": { "type": "uri", "label": "我的活動", "uri": "https://liff.line.me/REPLACE_LIFF_ID" }
     },
     {
-      "bounds": { "x": 0, "y": 843, "width": 833, "height": 843 },
+      "bounds": { "x": 0, "y": 976, "width": 833, "height": 710 },
       "action": { "type": "postback", "data": "a=stats", "displayText": "今日統計" }
     },
     {
-      "bounds": { "x": 833, "y": 843, "width": 834, "height": 843 },
+      "bounds": { "x": 833, "y": 976, "width": 834, "height": 710 },
       "action": { "type": "uri", "label": "收益與項目", "uri": "https://liff.line.me/REPLACE_LIFF_ID" }
     },
     {
-      "bounds": { "x": 1667, "y": 843, "width": 833, "height": 843 },
-      "action": { "type": "richmenuswitch", "richMenuAliasId": "menu-schedule", "data": "switch=schedule" }
+      "bounds": { "x": 1667, "y": 976, "width": 833, "height": 710 },
+      "action": { "type": "postback", "data": "a=help", "displayText": "使用說明" }
     }
   ]
 }

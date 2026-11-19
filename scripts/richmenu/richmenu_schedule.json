@@ -5,28 +5,36 @@
   "chatBarText": "📅 行程管理",
   "areas": [
     {
-      "bounds": { "x": 0, "y": 0, "width": 833, "height": 843 },
+      "bounds": { "x": 0, "y": 0, "width": 1250, "height": 266 },
+      "action": { "type": "postback", "data": "a=tab_invest", "displayText": "切換至 ⏱ 時光投資" }
+    },
+    {
+      "bounds": { "x": 1250, "y": 0, "width": 1250, "height": 266 },
+      "action": { "type": "postback", "data": "a=tab_schedule", "displayText": "📅 行程管理" }
+    },
+    {
+      "bounds": { "x": 0, "y": 266, "width": 833, "height": 710 },
       "action": { "type": "postback", "data": "a=today", "displayText": "今日行程" }
     },
     {
-      "bounds": { "x": 833, "y": 0, "width": 834, "height": 843 },
+      "bounds": { "x": 833, "y": 266, "width": 834, "height": 710 },
       "action": { "type": "postback", "data": "a=week", "displayText": "本週行程" }
     },
     {
-      "bounds": { "x": 1667, "y": 0, "width": 833, "height": 843 },
+      "bounds": { "x": 1667, "y": 266, "width": 833, "height": 710 },
       "action": { "type": "uri", "label": "管理行程", "uri": "https://liff.line.me/REPLACE_LIFF_ID#cal" }
     },
     {
-      "bounds": { "x": 0, "y": 843, "width": 833, "height": 843 },
+      "bounds": { "x": 0, "y": 976, "width": 833, "height": 710 },
       "action": { "type": "postback", "data": "a=remind_cfg", "displayText": "提醒設定" }
     },
     {
-      "bounds": { "x": 833, "y": 843, "width": 834, "height": 843 },
+      "bounds": { "x": 833, "y": 976, "width": 834, "height": 710 },
       "action": { "type": "postback", "data": "a=week", "displayText": "衝突檢查" }
     },
     {
-      "bounds": { "x": 1667, "y": 843, "width": 833, "height": 843 },
-      "action": { "type": "richmenuswitch", "richMenuAliasId": "menu-invest", "data": "switch=invest" }
+      "bounds": { "x": 1667, "y": 976, "width": 833, "height": 710 },
+      "action": { "type": "postback", "data": "a=cal_help", "displayText": "行程說明" }
     }
   ]
 }

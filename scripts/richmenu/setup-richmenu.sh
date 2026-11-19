@@ -101,7 +101,7 @@ curl -sS -X POST "$API/richmenu/alias" -H "$AUTH" -H 'Content-Type: application/
   -d "{\"richMenuAliasId\": \"menu-schedule\", \"richMenuId\": \"$ID2\"}" > /dev/null
 
 echo "⭐ 設定預設選單為【時光投資】..."
-curl -sS -f -X POST "$API/user/all/richmenu/$ID1" -H "$AUTH" > /dev/null
+curl -sS -f -X POST "$API/user/all/richmenu/$ID1" -H "$AUTH" -H "Content-Length: 0" > /dev/null
 
 echo "🎉 完成！雙分頁圖文選單已成功設定！"
 echo "   - 預設選單（時光投資）：$ID1 (alias: menu-invest)"
