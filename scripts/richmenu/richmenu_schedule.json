@@ -1,0 +1,32 @@
+{
+  "size": { "width": 2500, "height": 1686 },
+  "selected": false,
+  "name": "timeVest 行程管理選單",
+  "chatBarText": "📅 行程管理",
+  "areas": [
+    {
+      "bounds": { "x": 0, "y": 0, "width": 833, "height": 843 },
+      "action": { "type": "postback", "data": "a=today", "displayText": "今日行程" }
+    },
+    {
+      "bounds": { "x": 833, "y": 0, "width": 834, "height": 843 },
+      "action": { "type": "postback", "data": "a=week", "displayText": "本週行程" }
+    },
+    {
+      "bounds": { "x": 1667, "y": 0, "width": 833, "height": 843 },
+      "action": { "type": "uri", "label": "管理行程", "uri": "https://liff.line.me/REPLACE_LIFF_ID#cal" }
+    },
+    {
+      "bounds": { "x": 0, "y": 843, "width": 833, "height": 843 },
+      "action": { "type": "postback", "data": "a=remind_cfg", "displayText": "提醒設定" }
+    },
+    {
+      "bounds": { "x": 833, "y": 843, "width": 834, "height": 843 },
+      "action": { "type": "postback", "data": "a=week", "displayText": "衝突檢查" }
+    },
+    {
+      "bounds": { "x": 1667, "y": 843, "width": 833, "height": 843 },
+      "action": { "type": "richmenuswitch", "richMenuAliasId": "menu-invest", "data": "switch=invest" }
+    }
+  ]
+}
