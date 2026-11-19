@@ -6,49 +6,8 @@ on:
       - main
   workflow_dispatch:
 
-env:
-  REGISTRY: ghcr.io
-
 jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Log in to the Container registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}
-          tags: |
-            type=raw,value=latest
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
   deploy:
-    needs: build-and-push
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to VM via SSH
@@ -57,37 +16,25 @@ jobs:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
-          envs: GITHUB_TOKEN,GITHUB_ACTOR
           script: |
-            # Log in to GHCR on the VM
-            echo "$GITHUB_TOKEN" | sudo docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-
-            # Convert repository name to lowercase for pulling
-            IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-
-            # Pull latest docker image
-            sudo docker pull ghcr.io/$IMAGE_NAME:latest
-
+            set -e
             TARGET_DIR="$HOME/Habit-tracker"
-            mkdir -p "$TARGET_DIR/line_data"
 
-            # Stop and remove existing container if it exists
-            sudo docker stop habit-tracker || true
-            sudo docker rm habit-tracker || true
+            # 確保目錄存在並進入
+            cd "$TARGET_DIR"
 
-            # Run new container (輕量化限制記憶體 384M，避開過度佔用資源)
-            sudo docker run -d \
-              --name habit-tracker \
-              -p 127.0.0.1:7860:7860 \
-              --mem-limit 384m \
-              --restart always \
-              --env-file "$TARGET_DIR/.env" \
-              -v "$TARGET_DIR/line_data:/app/line_data" \
-              -e GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-key.json \
-              -v "$TARGET_DIR/gcp-key.json:/app/gcp-key.json" \
-              ghcr.io/$IMAGE_NAME:latest
+            # 確保代碼為最新版
+            git pull origin main
 
-            # 若先前有遺留的 caddy 容器，一併停止以釋放資源
-            sudo docker stop caddy 2>/dev/null || true
-            sudo docker rm caddy 2>/dev/null || true
-            echo "✅ habit-tracker 部署完成，監聽 127.0.0.1:7860"
+            # 確保資料夾存在
+            mkdir -p line_data
+
+            # 停止舊容器
+            sudo docker stop habit-tracker 2>/dev/null || true
+            sudo docker rm habit-tracker 2>/dev/null || true
+
+            # 直接使用 docker compose 本地建置並啟動 habit-tracker 服務
+            sudo docker compose up -d --build habit-tracker
+
+            echo "✅ habit-tracker 成功啟動！"
+            sudo docker ps | grep habit-tracker
