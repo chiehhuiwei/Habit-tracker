@@ -4,10 +4,10 @@ import hmac
 import json
 from datetime import datetime, timedelta
 
-from line_bot import state
-from line_bot.flows.pending import commit_if_stale
-from line_bot.flows.router import handle_event
-from line_bot.timefmt import TZ
+from timevest.line import state
+from timevest.line.flows.pending import commit_if_stale
+from timevest.line.flows.router import handle_event
+from timevest.line.timefmt import TZ
 
 BASE = {"source": {"userId": "U_owner"}, "replyToken": "r"}
 
@@ -118,7 +118,7 @@ def test_switching_action_commits_draft(env):
 
 
 def test_ics_expands_recurring_and_detects_conflicts(env):
-    from line_bot.calendar.events import conflict_uids, fetch_events
+    from timevest.line.calendar.events import conflict_uids, fetch_events
 
     start = datetime(2026, 11, 10, tzinfo=TZ)
     events = fetch_events(start, start + timedelta(days=14))
@@ -133,7 +133,7 @@ def test_ics_expands_recurring_and_detects_conflicts(env):
 
 
 def test_reminder_pushes_once_and_starts_from_event(env):
-    from line_bot.jobs.reminders import reminder_tick
+    from timevest.line.jobs.reminders import reminder_tick
 
     sent, bq = env["sent"], env["bq"]
     now = datetime(2026, 11, 12, 20, 20, tzinfo=TZ)
@@ -157,8 +157,8 @@ def test_webhook_signature(env):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    from line_bot import worker
-    from line_bot.routes import router
+    from timevest.line import worker
+    from timevest.line.routes import router
 
     app = FastAPI()
     app.include_router(router, prefix="/line")
@@ -170,3 +170,25 @@ def test_webhook_signature(env):
     assert client.post("/line/webhook", content=body, headers={"x-line-signature": good}).status_code == 200
     worker.submit(lambda: None).result()
     assert "timeVest 使用方式" in last_text(env["sent"])
+
+
+def test_invite_code_flow_and_isolated_state(env, monkeypatch):
+    from timevest.line import config, users
+
+    sent = env["sent"]
+    monkeypatch.setattr(config, "INVITE_CODE", "letmein")
+    stranger = {"source": {"userId": "U_new"}, "replyToken": "r2"}
+
+    handle_event({**stranger, "type": "message", "message": {"type": "text", "text": "開始"}})
+    assert "邀請碼" in last_text(sent)
+    assert not users.is_member("U_new")
+
+    handle_event({**stranger, "type": "message", "message": {"type": "text", "text": "letmein"}})
+    assert users.is_member("U_new") and "歡迎加入" in last_text(sent)
+
+    # 新成員開始記錄，不影響擁有者的計時狀態
+    handle_event({**stranger, "type": "message", "message": {"type": "text", "text": "開始 游泳"}})
+    with users.use("U_new"):
+        assert state.get_session() is not None
+    with users.use("U_owner"):
+        assert state.get_session() is None

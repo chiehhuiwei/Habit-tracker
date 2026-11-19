@@ -18,12 +18,8 @@ os.environ.update(
     LINE_CHANNEL_ACCESS_TOKEN="test-token",
     LINE_OWNER_USER_ID="U_owner",
     LINE_DATA_DIR=str(TMP / "line_data"),
-    LINE_CALENDARS_FILE=str(TMP / "calendars.json"),
 )
-(TMP / "calendars.json").write_text(
-    json.dumps([{"key": "teach", "label": "教英文", "emoji": "🧑‍🏫", "url": ICS_URL, "investment": "教英文"}]),
-    encoding="utf-8",
-)
+CALENDARS = [{"key": "teach", "label": "教英文", "emoji": "🧑‍🏫", "url": ICS_URL, "investment": "教英文"}]
 
 
 class FakeBigQuery:
@@ -64,16 +60,15 @@ class FakeResponse:
 
 @pytest.fixture
 def env(monkeypatch):
-    import timevest_service as tvs
+    from timevest.core import service as tvs
 
-    for name in ("INVESTMENTS_FILE", "ITEMS_FILE", "MILESTONES_FILE"):
-        monkeypatch.setattr(tvs, name, str(TMP / f"{name.lower()}.json"))
-        Path(getattr(tvs, name)).unlink(missing_ok=True)
-    state_file = TMP / "line_data" / "state.json"
-    state_file.unlink(missing_ok=True)
+    from timevest.core import store
 
-    from line_bot import api, ledger, state
-    from line_bot.calendar import ics
+    store.connect(":memory:")  # 每個測試一個乾淨的資料庫
+    store.kv_set("U_owner", "calendars", CALENDARS)
+
+    from timevest.line import api, ledger, state
+    from timevest.line.calendar import ics
 
     bq = FakeBigQuery()
     service = tvs.TimeVestService(bq, "p.d.habit_logs")
