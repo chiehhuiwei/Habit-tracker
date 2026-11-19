@@ -1,18 +1,14 @@
+import copy
 import os
-import json
+import re
 import uuid
 import datetime
 from zoneinfo import ZoneInfo
+from timevest.core import store
 from google.cloud import bigquery
 from google.api_core.exceptions import NotFound
 import pandas as pd
 
-
-# JSON database files
-DATA_DIR = os.path.dirname(os.path.abspath(__file__))
-INVESTMENTS_FILE = os.path.join(DATA_DIR, "investments.json")
-ITEMS_FILE = os.path.join(DATA_DIR, "items.json")
-MILESTONES_FILE = os.path.join(DATA_DIR, "milestones.json")
 
 # Default seed data matching SwiftUI project
 DEFAULT_INVESTMENTS = [
@@ -45,41 +41,59 @@ DEFAULT_INVESTMENTS = [
     }
 ]
 
-# Helper functions to load/save JSON
-def load_json(file_path, default_data):
-    if not os.path.exists(file_path):
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(default_data, f, ensure_ascii=False, indent=4)
-        return default_data
+def upgrade_schema(bq_client, table_id):
+    """Checks and adds item tracking / user_id columns to the BigQuery schema if they don't exist."""
     try:
-        if os.path.exists(file_path) and os.path.getsize(file_path) == 0:
-            with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(default_data, f, ensure_ascii=False, indent=4)
-            return default_data
-        with open(file_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+        table = bq_client.get_table(table_id)
+        existing_names = {field.name for field in table.schema}
+        new_fields = []
+        for name, kind in (("item_name", "STRING"), ("progress_snapshot", "FLOAT"), ("total_pages", "FLOAT"), ("user_id", "STRING")):
+            if name not in existing_names:
+                new_fields.append(bigquery.SchemaField(name, kind))
+        if new_fields:
+            table.schema = table.schema + new_fields
+            bq_client.update_table(table, ["schema"])
+            print(f"BigQuery schema upgraded: {[f.name for f in new_fields]}")
     except Exception as e:
-        print(f"Error loading {file_path}: {e}")
-        return default_data
+        print(f"Warning: BigQuery schema upgrade check failed: {e}")
 
-def save_json(file_path, data):
-    try:
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-    except Exception as e:
-        print(f"Error saving {file_path}: {e}")
 
 # Service class for database & metadata
 class TimeVestService:
-    def __init__(self, bq_client, table_id):
+    def __init__(self, bq_client, table_id, user_id=None, legacy_owner=False):
+        """user_id=None 為單人舊模式（資料歸 "_single"）。legacy_owner=True 代表此使用者擁有 user_id 為 NULL 的舊 BigQuery 紀錄（含 Garmin）。
+        帳戶／項目／里程碑存在 SQLite（store.py），每位使用者各自一份。"""
         self.bq_client = bq_client
         self.table_id = table_id
-        
-        # Load local configs
-        self.investments = load_json(INVESTMENTS_FILE, DEFAULT_INVESTMENTS)
-        self.items = load_json(ITEMS_FILE, [])
-        self.milestones = load_json(MILESTONES_FILE, [])
+        self.user_id = user_id
+        self.owner_key = user_id or "_single"
+        if user_id is not None and not re.fullmatch(r"[A-Za-z0-9_-]+", user_id):
+            raise ValueError("invalid user_id")
+        if user_id is None:
+            self.user_sql = ""
+        elif legacy_owner:
+            self.user_sql = f" AND (user_id = '{user_id}' OR user_id IS NULL)"
+        else:
+            self.user_sql = f" AND user_id = '{user_id}'"
+
+        self.investments = store.load_list("investments", self.owner_key)
+        if self.investments is None:
+            # 第一次使用：放預設帳戶（只放一次，之後使用者刪光也不會再出現）
+            self.investments = [] if store.kv_get(self.owner_key, "seeded") else copy.deepcopy(DEFAULT_INVESTMENTS)
+            self._save_inv()
+            store.kv_set(self.owner_key, "seeded", True)
+        self.items = store.load_list("items", self.owner_key) or []
+        self.milestones = store.load_list("milestones", self.owner_key) or []
         self.deduplicate_items()
+
+    def _save_inv(self):
+        store.save_list("investments", self.owner_key, self.investments)
+
+    def _save_items(self):
+        store.save_list("items", self.owner_key, self.items)
+
+    def _save_milestones(self):
+        store.save_list("milestones", self.owner_key, self.milestones)
 
     def deduplicate_items(self):
         """Deduplicates items in-memory and saves back to ITEMS_FILE if duplicates were found.
@@ -132,29 +146,11 @@ class TimeVestService:
                 
         if changed:
             self.items = new_items
-            save_json(ITEMS_FILE, self.items)
+            self._save_items()
             print(f"Deduplicated items: original count was {len(self.items) + (len(grouped) - len(new_items))}, new count is {len(self.items)}")
 
     def upgrade_schema(self):
-        """Checks and adds item tracking columns to BigQuery schema if they don't exist."""
-        try:
-            table = self.bq_client.get_table(self.table_id)
-            existing_names = {field.name for field in table.schema}
-            new_fields = []
-            
-            if "item_name" not in existing_names:
-                new_fields.append(bigquery.SchemaField("item_name", "STRING"))
-            if "progress_snapshot" not in existing_names:
-                new_fields.append(bigquery.SchemaField("progress_snapshot", "FLOAT"))
-            if "total_pages" not in existing_names:
-                new_fields.append(bigquery.SchemaField("total_pages", "FLOAT"))
-                
-            if new_fields:
-                table.schema = table.schema + new_fields
-                self.bq_client.update_table(table, ["schema"])
-                print("BigQuery schema upgraded with item tracking fields successfully.")
-        except Exception as e:
-            print(f"Warning: BigQuery schema upgrade check failed: {e}")
+        upgrade_schema(self.bq_client, self.table_id)
 
     # --- Investments ---
     def get_investments(self):
@@ -171,15 +167,23 @@ class TimeVestService:
             "total_duration": 0
         }
         self.investments.append(new_inv)
-        save_json(INVESTMENTS_FILE, self.investments)
+        self._save_inv()
         return new_inv
 
     def delete_investment(self, inv_id):
         self.investments = [inv for inv in self.investments if inv["id"] != inv_id]
-        save_json(INVESTMENTS_FILE, self.investments)
+        self._save_inv()
         # Cascade deletion to items
         self.items = [item for item in self.items if item["investment_id"] != inv_id]
-        save_json(ITEMS_FILE, self.items)
+        self._save_items()
+
+    def set_favorite(self, inv_id, favorite):
+        for inv in self.investments:
+            if inv["id"] == inv_id:
+                inv["favorite"] = bool(favorite)
+                self._save_inv()
+                return True
+        return False
 
     # --- Items ---
     def get_items(self, inv_id=None, status=None):
@@ -206,7 +210,7 @@ class TimeVestService:
             "created_at": datetime.datetime.now(ZoneInfo("Asia/Taipei")).isoformat()
         }
         self.items.append(new_item)
-        save_json(ITEMS_FILE, self.items)
+        self._save_items()
         return new_item
 
     def set_item_status(self, item_id, status):
@@ -214,11 +218,11 @@ class TimeVestService:
             if item["id"] == item_id:
                 item["status"] = status
                 break
-        save_json(ITEMS_FILE, self.items)
+        self._save_items()
 
     def delete_item(self, item_id):
         self.items = [item for item in self.items if item["id"] != item_id]
-        save_json(ITEMS_FILE, self.items)
+        self._save_items()
 
     # --- Activities & Milestone triggers ---
     def log_activity(self, inv_id, item_id, duration_seconds, detail, start_time, end_time, progress_snapshot=None):
@@ -237,7 +241,8 @@ class TimeVestService:
                 "detail": detail,
                 "item_name": item["name"] if item else None,
                 "progress_snapshot": progress_snapshot,
-                "total_pages": item["total"] if item else None
+                "total_pages": item["total"] if item else None,
+                "user_id": self.user_id,
             }
         ]
         
@@ -253,7 +258,7 @@ class TimeVestService:
             item["progress"] = min(progress_snapshot, 1.0)
             if item["progress"] >= 1.0 and prev_progress < 1.0:
                 item["status"] = "completed"
-            save_json(ITEMS_FILE, self.items)
+            self._save_items()
 
         # 3. Check and unlock Milestones
         new_milestones = self.check_milestones(inv, item, prev_progress, duration_seconds)
@@ -279,13 +284,13 @@ class TimeVestService:
 
         # B. Month-end summary checks (run dynamically based on BQ logs)
         # We save milestones locally to cache them
-        save_json(MILESTONES_FILE, self.milestones)
+        self._save_milestones()
         return newly_unlocked
 
     # --- Stats & Query Summaries ---
     def get_portfolio_summary(self, year=None, month=None, start_date=None, end_date=None):
         # We query BigQuery for overall stats to avoid drift
-        where_clause = "WHERE 1=1"
+        where_clause = f"WHERE 1=1{self.user_sql}"
         if year:
             where_clause += f" AND EXTRACT(YEAR FROM start_time) = {year}"
         if month:
@@ -327,7 +332,7 @@ class TimeVestService:
         query_today = f"""
             SELECT SUM(duration_second) as today_sec
             FROM `{self.table_id}`
-            WHERE start_time >= '{today_start.isoformat()}'
+            WHERE start_time >= '{today_start.isoformat()}'{self.user_sql}
         """
         try:
             df_today = self.bq_client.query(query_today).to_dataframe()
@@ -351,6 +356,7 @@ class TimeVestService:
         query = f"""
             SELECT DISTINCT DATE(start_time) as date
             FROM `{self.table_id}`
+            WHERE 1=1{self.user_sql}
             ORDER BY date DESC
         """
         try:
@@ -378,7 +384,7 @@ class TimeVestService:
             return 0
 
     def get_allocation(self, year=None, month=None, start_date=None, end_date=None):
-        where_clause = "WHERE 1=1"
+        where_clause = f"WHERE 1=1{self.user_sql}"
         if year:
             where_clause += f" AND EXTRACT(YEAR FROM start_time) = {year}"
         if month:
@@ -466,6 +472,7 @@ class TimeVestService:
                 MAX(progress_snapshot) as max_prog,
                 SUM(duration_second) as duration_sec
             FROM `{self.table_id}`
+            WHERE 1=1{self.user_sql}
             GROUP BY month, habit_name, item_name, detail
             ORDER BY month DESC
         """
@@ -571,7 +578,7 @@ class TimeVestService:
                 self.milestones.append(m)
 
             self.milestones.sort(key=lambda x: x["date_unlocked"], reverse=True)
-            save_json(MILESTONES_FILE, self.milestones)
+            self._save_milestones()
         except Exception as e:
             print(f"Monthly summary engine failed: {e}")
 
@@ -582,13 +589,14 @@ class TimeVestService:
         elif "健身" in habit_name:
             name_filter = "habit_name IN ('健身', 'Gym', 'Strength')"
         else:
-            name_filter = f"habit_name = '{habit_name}'"
+            safe_name = habit_name.replace("\\", "\\\\").replace("'", "\\'")
+            name_filter = f"habit_name = '{safe_name}'"
 
         query = f"""
             SELECT id, start_time, habit_name, detail, item_name, progress_snapshot, total_pages, duration_second
             FROM `{self.table_id}`
             WHERE DATE(start_time) >= '{start_date}' AND DATE(start_time) <= '{end_date}'
-              AND {name_filter}
+              AND {name_filter}{self.user_sql}
             ORDER BY start_time DESC
         """
         try:
@@ -605,8 +613,10 @@ class TimeVestService:
     def update_historical_activity(self, row_id, start_date, item_name, progress_snapshot, total_pages, detail):
         prog_sql = f"{progress_snapshot}" if progress_snapshot is not None else "NULL"
         tot_sql = f"{total_pages}" if total_pages is not None else "NULL"
-        item_sql = f"'{item_name}'" if item_name else "NULL"
-        detail_sql = f"'{detail}'" if detail else "NULL"
+        def _q(v):
+            return "'" + str(v).replace("\\", "\\\\").replace("'", "\\'") + "'"
+        item_sql = _q(item_name) if item_name else "NULL"
+        detail_sql = _q(detail) if detail else "NULL"
 
         query = f"""
             UPDATE `{self.table_id}`
@@ -614,7 +624,7 @@ class TimeVestService:
                 progress_snapshot = {prog_sql},
                 total_pages = {tot_sql},
                 detail = {detail_sql}
-            WHERE id = '{row_id}' AND DATE(start_time) = '{start_date}'
+            WHERE id = '{row_id}' AND DATE(start_time) = '{start_date}'{self.user_sql}
         """
         try:
             query_job = self.bq_client.query(query)
@@ -627,7 +637,7 @@ class TimeVestService:
     def delete_historical_activity(self, row_id, start_date):
         query = f"""
             DELETE FROM `{self.table_id}`
-            WHERE id = '{row_id}' AND DATE(start_time) = '{start_date}'
+            WHERE id = '{row_id}' AND DATE(start_time) = '{start_date}'{self.user_sql}
         """
         try:
             query_job = self.bq_client.query(query)
@@ -661,5 +671,5 @@ class TimeVestService:
             else:
                 item.pop("completed_at", None)
                 
-        save_json(ITEMS_FILE, self.items)
+        self._save_items()
         return True, "已成功更新項目進度！"
