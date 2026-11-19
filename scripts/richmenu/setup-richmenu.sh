@@ -22,19 +22,31 @@ fi
 API="https://api.line.me/v2/bot"
 AUTH="Authorization: Bearer $LINE_CHANNEL_ACCESS_TOKEN"
 
-json_field() {
-  python3 -c "import sys, json; print(json.load(sys.stdin).get('$1', ''))"
-}
-
+# 用 Python 安全處理 JSON（替換 LIFF_ID 或退回 postback）
 prepare_json() {
   local src="$1"
   local dest="$2"
-  if [ -n "${LIFF_ID:-}" ]; then
-    sed "s/REPLACE_LIFF_ID/$LIFF_ID/g" "$src" > "$dest"
-  else
-    # 尚未設定 LIFF_ID 時轉成 postback 免得 LINE API 報 400
-    sed -E 's#"type": "uri"[^}]+REPLACE_LIFF_ID[^}]*\}#"type": "postback", "data": "a=stats", "displayText": "功能選單"#g' "$src" > "$dest"
-  fi
+  python3 -c "
+import json, os, sys
+
+src, dest, liff_id = sys.argv[1], sys.argv[2], os.environ.get('LIFF_ID', '').strip()
+with open(src, 'r', encoding='utf-8') as f:
+    data = json.load(f)
+
+for area in data.get('areas', []):
+    action = area.get('action', {})
+    if action.get('type') == 'uri':
+        uri = action.get('uri', '')
+        if 'REPLACE_LIFF_ID' in uri:
+            if liff_id:
+                action['uri'] = uri.replace('REPLACE_LIFF_ID', liff_id)
+            else:
+                # 沒設 LIFF_ID 轉 postback 免得 LINE API 報錯
+                area['action'] = {'type': 'postback', 'data': 'a=stats', 'displayText': action.get('label', '功能')}
+
+with open(dest, 'w', encoding='utf-8') as f:
+    json.dump(data, f, ensure_ascii=False, indent=2)
+" "$src" "$dest"
 }
 
 echo "🧹 正在清理舊的 rich menu 與 aliases..."
@@ -57,14 +69,28 @@ prepare_json "$DIR/richmenu_invest.json" "$TMP1"
 prepare_json "$DIR/richmenu_schedule.json" "$TMP2"
 
 echo "📤 上傳【選單 1：時光投資】..."
-ID1=$(curl -sS -X POST "$API/richmenu" -H "$AUTH" -H 'Content-Type: application/json' -d @"$TMP1" | json_field richMenuId)
-[ -n "$ID1" ] || { echo "❌ 建立時光投資選單失敗"; exit 1; }
+RES1=$(curl -sS -X POST "$API/richmenu" -H "$AUTH" -H 'Content-Type: application/json' -d @"$TMP1")
+ID1=$(python3 -c "import sys, json; print(json.loads(sys.argv[1]).get('richMenuId', ''))" "$RES1" 2>/dev/null || true)
+if [ -z "$ID1" ]; then
+  echo "❌ 建立時光投資選單失敗，LINE 回傳："
+  echo "$RES1"
+  echo "--- 發送的 JSON 內容 ---"
+  cat "$TMP1"
+  exit 1
+fi
+
 curl -sS -f -X POST "https://api-data.line.me/v2/bot/richmenu/$ID1/content" -H "$AUTH" \
   -H 'Content-Type: image/png' --data-binary @"$DIR/richmenu_invest.png" > /dev/null
 
 echo "📤 上傳【選單 2：行程管理】..."
-ID2=$(curl -sS -X POST "$API/richmenu" -H "$AUTH" -H 'Content-Type: application/json' -d @"$TMP2" | json_field richMenuId)
-[ -n "$ID2" ] || { echo "❌ 建立行程管理選單失敗"; exit 1; }
+RES2=$(curl -sS -X POST "$API/richmenu" -H "$AUTH" -H 'Content-Type: application/json' -d @"$TMP2")
+ID2=$(python3 -c "import sys, json; print(json.loads(sys.argv[1]).get('richMenuId', ''))" "$RES2" 2>/dev/null || true)
+if [ -z "$ID2" ]; then
+  echo "❌ 建立行程管理選單失敗，LINE 回傳："
+  echo "$RES2"
+  exit 1
+fi
+
 curl -sS -f -X POST "https://api-data.line.me/v2/bot/richmenu/$ID2/content" -H "$AUTH" \
   -H 'Content-Type: image/png' --data-binary @"$DIR/richmenu_schedule.png" > /dev/null
 
