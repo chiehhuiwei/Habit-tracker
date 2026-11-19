@@ -27,6 +27,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set lower case owner and repo name
+        run: |
+          echo "IMAGE_NAME=${REGISTRY}/${GITHUB_REPOSITORY,,}:latest" >> $GITHUB_ENV
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -35,7 +39,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ env.REGISTRY }}/${{ github.repository }}:latest
+          tags: ${{ env.IMAGE_NAME }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -58,9 +62,11 @@ jobs:
             TARGET_DIR="$HOME/Habit-tracker"
             mkdir -p "$TARGET_DIR/line_data"
 
-            IMAGE_NAME="${{ env.REGISTRY }}/${{ github.repository }}:latest"
+            # 轉小寫 repo 名稱
+            REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+            IMAGE_NAME="${{ env.REGISTRY }}/$REPO_LOWER:latest"
 
-            # 登入 GHCR 並直接 Pull 預先編譯好的映像檔（極速，不消耗 VM CPU/RAM）
+            # 登入 GHCR 並直接 Pull 預先編譯好的映像檔
             echo "$GITHUB_TOKEN" | sudo docker login ${{ env.REGISTRY }} -u "$GITHUB_ACTOR" --password-stdin
             sudo docker pull "$IMAGE_NAME"
 
