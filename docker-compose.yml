@@ -2,19 +2,22 @@ services:
   habit-tracker:
     build: .
     image: habit-tracker:latest
+    container_name: habit-tracker
     restart: unless-stopped
     ports:
-      - "7860:7860"
-    mem_limit: 512m
-    memswap_limit: 512m
+      - "127.0.0.1:7860:7860"
+    mem_limit: 384m
+    memswap_limit: 384m
     env_file:
       - .env
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-key.json
     volumes:
       # SQLite 資料庫（line_data/timevest.db），重建 image 不會遺失
       - ./line_data:/app/line_data
+      - ./gcp-key.json:/app/gcp-key.json:ro
 
-  # LINE Webhook 需要 HTTPS：docker compose --profile https up -d
-  # 需在 .env 設定 LINE_DOMAIN，且該網域 DNS 指向這台 VM、防火牆開 80/443
+  # 僅在有獨立網域且未佔用 80/443 時使用（docker compose --profile https up -d）
   caddy:
     image: caddy:2
     profiles: ["https"]
