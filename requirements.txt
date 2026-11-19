@@ -1,7 +1,7 @@
-gradio==5.49.1
+fastapi>=0.110.0
+uvicorn>=0.29.0
 pandas>=2.0.0
 google-cloud-bigquery>=3.0.0
-matplotlib>=3.7.0
 db-dtypes>=1.0.0
 python-dotenv>=1.0.0
 google-cloud-bigquery-storage>=2.0.0
