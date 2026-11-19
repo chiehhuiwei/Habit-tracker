@@ -1,17 +1,18 @@
 # ── Stage 1: dependency builder ─────────────────────────────────────────────
 FROM python:3.10-slim AS builder
 
-# Pull the official uv binary (avoids pip-installing uv itself)
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
-
-# Compile bytecode and use copy link-mode so the venv works after COPY
-ENV UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy
-
 WORKDIR /app
 
-# Install Python dependencies using a build-time cache mount.
-# This layer is only invalidated when requirements.txt changes.
+# 安裝 curl 並透過官方獨立二進位安裝 uv（避免 ghcr.io 登入認證限制）
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \
+    curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    rm -rf /var/lib/apt/lists/*
+
+ENV PATH="/root/.local/bin:$PATH" \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
+
+# Install Python dependencies using a build-time cache mount
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=requirements.txt,target=requirements.txt \
     uv venv /app/.venv && \
@@ -20,7 +21,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # ── Stage 2: lean runtime image ─────────────────────────────────────────────
 FROM python:3.10-slim
 
-# Set environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/app/.venv/bin:$PATH"
@@ -33,7 +33,7 @@ COPY --from=builder /app/.venv /app/.venv
 # Copy the rest of the application
 COPY . .
 
-# FastAPI (LINE webhook + LIFF + REST API) on 7860; HTTPS is terminated by Caddy
+# FastAPI on 7860
 EXPOSE 7860
 
 CMD ["python", "-m", "timevest.main"]
