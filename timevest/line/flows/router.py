@@ -33,6 +33,8 @@ ACTIONS = {
     "remind_cfg": lambda ev, p: _reply_cal_help(ev["replyToken"]),
     "bind_cal": lambda ev, p: _reply_cal_help(ev["replyToken"]),
     "help": lambda ev, p: reply(ev["replyToken"], help_message()),
+    "tab_invest": lambda ev, p: None,
+    "tab_schedule": lambda ev, p: None,
     "cancel": _cancel,
     "inv": lambda ev, p: on_activity_chosen(ev["replyToken"], ledger.get_investment(p.get("id"))),
     "item": lambda ev, p: on_item_chosen(ev["replyToken"], p.get("id")),

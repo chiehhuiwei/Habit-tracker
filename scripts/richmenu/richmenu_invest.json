@@ -6,11 +6,11 @@
   "areas": [
     {
       "bounds": { "x": 0, "y": 0, "width": 1250, "height": 266 },
-      "action": { "type": "postback", "data": "a=tab_invest", "displayText": "⏱ 時光投資" }
+      "action": { "type": "richmenuswitch", "richMenuAliasId": "menu-invest", "data": "a=tab_invest" }
     },
     {
       "bounds": { "x": 1250, "y": 0, "width": 1250, "height": 266 },
-      "action": { "type": "postback", "data": "a=tab_schedule", "displayText": "切換至 📅 行程管理" }
+      "action": { "type": "richmenuswitch", "richMenuAliasId": "menu-schedule", "data": "a=tab_schedule" }
     },
     {
       "bounds": { "x": 0, "y": 266, "width": 833, "height": 710 },
